@@ -967,6 +967,26 @@ body {
   .header, .left-panel, .print-hide,
   #fund-issue-card, #chart-placeholder, #chart-all, #chart-manager { display: none !important; }
   .right-panel { width: 100%; border-left: none; padding: 0; background: #fff; }
-  .ledger-wrap { box-shadow: none; }
+
+  /* 화면에서는 #ledger-panel이 position:fixed + height:calc(100vh - 56px) + overflow-y:auto인
+     "내부 스크롤이 있는 고정폭 오버레이"라서, 인쇄 시 브라우저가 그 한 화면 분량만 찍고 나머지는
+     통째로 잘라버린다(배율을 줄여도 잘리는 범위 자체가 안 바뀌어서 안 나오던 원인). 인쇄할 땐
+     고정 위치/높이/스크롤을 전부 풀어서 문서가 원래 길이대로 여러 페이지에 자연스럽게
+     이어지게 한다. */
+  #ledger-panel {
+    position: static !important;
+    top: auto !important; right: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+  .ledger-wrap { height: auto !important; box-shadow: none; }
+  .ledger-table-wrap { overflow: visible !important; flex: none !important; }
+  .ledger-split-panel { overflow: visible !important; }
+  .ledger-split-wrap { flex-direction: column !important; }
+  .ledger-row { break-inside: avoid; }
+
   .chart-card, .ledger-header, .ledger-summary, .ledger-table-wrap { box-shadow: none; border: 1px solid var(--테두리); }
 }
