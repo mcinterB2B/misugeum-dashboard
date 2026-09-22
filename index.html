@@ -987,6 +987,51 @@ body {
   .trend-modal-body { padding: 4px 12px 14px; }
 }
 
+/* ── 실제 모바일 폰(갤럭시/아이폰 등, 대략 480px 이하) 전용 보정.
+   위 900px 구간은 원래 "좁은 창을 캡처해서 이미지로 남기는 용도"로 폰트·여백을
+   극단까지 줄여둔 모드라(예: KPI 글자 7px), 실제 폰 화면 비율로 보면 PC 레이아웃을
+   억지로 욱여넣은 것처럼 답답하고 읽기 불편했다. 900px 구간의 압축은 그대로 두고
+   (캡처용으로 계속 쓰일 수 있으니), 진짜 폰 너비에서만 이 규칙들로 다시 풀어서
+   화면 비율에 맞게 편하게 보이도록 한다. ── */
+@media (max-width: 480px) {
+  .left-panel { padding: 12px 10px 24px; }
+  .right-panel { padding: 12px 10px; }
+  .header { padding: 10px 12px; }
+  .header-title { font-size: 15px; }
+
+  /* KPI 카드 - 1줄 4칸에 7px 글자로 욱여넣는 대신, 2x2로 나눠 다시 읽을 수 있는
+     크기로. 폰에서는 가로로 쭉 훑기보다 2줄로 보는 게 자연스럽다. */
+  .kpi-grid { flex-wrap: wrap; gap: 8px; }
+  .kpi-card { flex: 1 1 calc(50% - 4px); min-width: 0; width: auto; padding: 12px 14px; border-left-width: 4px; }
+  .kpi-value { font-size: 18px; letter-spacing: -0.5px; }
+  .kpi-value.large { font-size: 20px; }
+  .kpi-title { font-size: 11px; margin-bottom: 4px; white-space: normal; }
+  .kpi-sub { font-size: 10px; white-space: normal; }
+
+  /* 필터 버튼 - 터치하기 편하게 살짝 키움 */
+  .filter-btn { padding: 5px 10px; font-size: 12px; }
+  .reset-btn { padding: 5px 12px; }
+
+  /* 기간 입력칸(YYMMDD 텍스트 입력) - 기본 입력폭이 넓어서 줄마다 하나씩만 놓이며
+     지저분하게 줄바꿈되던 것을 폰 폭에 맞는 고정폭으로 줄여 한 줄에 자연스럽게 배치 */
+  .ledger-date-input { width: 78px; flex: 0 0 auto; }
+  .search-box { width: 100%; }
+  .table-header { flex-direction: column; align-items: stretch; }
+  .table-controls { width: 100%; }
+
+  /* 최근 입금내역 표 - 거래처명이 길면 표 전체가 넓어져서 정작 중요한 입금액
+     컬럼이 화면 밖으로 밀려났었다. 거래처명만 줄임표로 잘라 표를 화면 폭 안에 맞춘다 */
+  #table-body .ledger-table td,
+  #table-body .ledger-table th { padding: 6px 6px; }
+  #table-body .ledger-table td:nth-child(2),
+  #table-body .ledger-table th:nth-child(2) {
+    max-width: 88px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 /* ── 원장 PDF 다운로드 (window.print() → "PDF로 저장") - 화면 전용 요소(필터/버튼/왼쪽
    패널 전체)는 감추고 원장 표만 인쇄되게 한다. 별도 라이브러리 없이 브라우저 인쇄
    기능만으로 처리하므로 파일 구조는 그대로 유지된다. ── */
