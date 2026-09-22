@@ -985,7 +985,10 @@ body {
   .ledger-wrap { height: auto !important; box-shadow: none; }
   .ledger-table-wrap { overflow: visible !important; flex: none !important; }
   .ledger-split-panel { overflow: visible !important; }
-  .ledger-split-wrap { flex-direction: column !important; }
+  /* 매출/입금 분리 뷰는 화면과 똑같이 좌우 2단 그대로 인쇄 - 위아래로 쌓지 않는다 */
+  .ledger-split-wrap { display: flex !important; flex-direction: row !important; }
+  .ledger-split-panel.sale-panel { flex: 1 !important; }
+  .ledger-split-panel.deposit-panel { flex: 0 0 42% !important; }
   .ledger-row { break-inside: avoid; }
 
   .chart-card, .ledger-header, .ledger-summary, .ledger-table-wrap { box-shadow: none; border: 1px solid var(--테두리); }
