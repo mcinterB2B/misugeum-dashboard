@@ -31,6 +31,7 @@
   - formatDate(serial)       : 엑셀 날짜 시리얼 → YYYY-MM-DD
   - calcRisk(serial, paytype): 위험도 계산
   - renderFundIssues()       : 자금 특이사항(과입금/선입금) 렌더 - 필터와 무관하게 항상 표시
+  - setupChartAllLayout()    : 오른쪽 패널에 집중 관리 대상 카드를 붙이고 3개 카드(순위/막대/집중관리) 배치 클래스 부여
   - setMainTab(tab)          : 메인 카드의 탭 전환(최근 입금내역/미수 업체 리스트, 검색 시 미수현황/입금내역)
   - buildOutstandingTabHtml(): "미수 업체 리스트" 탭 내용 (액수 큰 순)
   - setLedgerDateThisMonth() : 원장 기간 필터 빠른 선택 - 당월 1일~말일
@@ -133,6 +134,7 @@ function init() {
   renderManagerFilter();
   renderPaytypeFilter();
   renderRiskFilter();
+  setupChartAllLayout();
   applyFilters();
   renderFundIssues();
   var btn = document.getElementById("expand-btn");
@@ -800,8 +802,8 @@ function buildTopBadDebtHtml() {
     .sort(function(a, b) { return b.maxDays - a.maxDays; })
     .slice(0, 10);
 
-  var html = '<div class="baddebt-panel">';
-  html += '<div class="baddebt-title">집중 관리 대상 <span class="baddebt-title-sub">(Top 10 최장 미회수 거래처)</span></div>';
+  // 오른쪽 패널 #baddebt-card 안에 들어가는 내용(제목 + 표). 다른 카드 제목과 같은 chart-title 모양.
+  var html = '<div class="chart-title">집중 관리 대상 <span class="baddebt-title-sub">(Top 10 최장 미회수 거래처)</span></div>';
   if (top10.length === 0) {
     html += '<div class="baddebt-empty">위험/심각 등급 미수금이 없습니다</div>';
   } else {
@@ -817,8 +819,30 @@ function buildTopBadDebtHtml() {
     });
     html += '</tbody></table>';
   }
-  html += '</div>';
   return html;
+}
+
+// ── 오른쪽 패널 #chart-all 안의 3개 카드 배치.
+//    [담당자별 미수금(순위 리스트) | 집중 관리 대상]
+//    [담당자별 미수금 현황(막대)   |  (집중 관리 대상 아래로 이어짐)]
+//    집중 관리 대상 카드는 매크로(정적 레이아웃)에 없으므로 여기서 한 번만 만들어 붙이고,
+//    순위/막대 카드는 안의 요소로 찾아 클래스를 달아 CSS 그리드가 위치를 잡게 한다
+//    (매크로가 만든 카드 순서가 어떻든 위치가 고정되도록 nth-child에 의존하지 않는다). ──
+function setupChartAllLayout() {
+  var host = document.getElementById('chart-all');
+  if (!host) return;
+  var rankEl = document.getElementById('manager-rank-list');
+  var barEl = document.getElementById('chart-bar');
+  if (rankEl && rankEl.closest('.chart-card')) rankEl.closest('.chart-card').classList.add('card-rank');
+  if (barEl && barEl.closest('.chart-card')) barEl.closest('.chart-card').classList.add('card-bar');
+  var card = document.getElementById('baddebt-card');
+  if (!card) {
+    card = document.createElement('div');
+    card.id = 'baddebt-card';
+    card.className = 'chart-card';
+    host.appendChild(card);
+  }
+  card.innerHTML = buildTopBadDebtHtml();
 }
 
 // ── 미수 테이블 렌더링 ──
@@ -855,10 +879,9 @@ function renderTable() {
     ], tab);
     var bodyHtml;
     if (tab === 'deposit') {
-      bodyHtml = '<div class="deposit-split-row"><div class="deposit-table-col">' + buildDepositListHtml(depositsInRange) +
-        '</div><div class="top-baddebt-col">' + buildTopBadDebtHtml() + '</div></div>';
+      bodyHtml = '<div class="tab-body">' + buildDepositListHtml(depositsInRange) + '</div>';
     } else {
-      bodyHtml = '<div class="outstanding-wrap">' + buildOutstandingTabHtml() + '</div>';
+      bodyHtml = '<div class="tab-body">' + buildOutstandingTabHtml() + '</div>';
     }
     tableContainer.innerHTML = tabsHtml + bodyHtml;
     return;

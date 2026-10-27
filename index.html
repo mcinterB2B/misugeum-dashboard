@@ -196,10 +196,24 @@ body {
 .kpi-value { font-size: 22px; font-weight: 800; color: var(--글자색); letter-spacing: -1.5px; line-height: 1.1; }
 .kpi-value.large { font-size: 26px; }
 .kpi-sub { font-size: 11px; color: var(--회색글자); margin-top: 4px; }
-#chart-all, #chart-manager {
+#chart-manager {
   display: flex;
   gap: 12px;
 }
+/* 오른쪽 패널 카드 3개 배치(2열 그리드): 왼쪽 열은 위에서 아래로 [담당자별 미수금 → 담당자별
+   미수금 현황 막대], 오른쪽 열은 [집중 관리 대상]이 두 줄 높이를 통째로 차지한다. 그리드라서
+   카드끼리 겹치거나 잘리지 않고, 한쪽이 길어지면 다른 쪽 카드가 같은 높이로 늘어난다.
+   minmax(0,1fr): 긴 거래처명이 칸을 밀어내지 않고 안에서 줄바꿈되게 한다. */
+#chart-all {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-auto-rows: auto;
+  gap: 12px;
+  align-items: stretch;
+}
+#chart-all > .card-rank { grid-column: 1; grid-row: 1; }
+#chart-all > .card-bar  { grid-column: 1; grid-row: 2; }
+#chart-all > #baddebt-card { grid-column: 2; grid-row: 1 / span 2; border-top: 3px solid var(--빨강); }
 .chart-card {
   background: var(--흰색);
   border-radius: 12px;
@@ -293,6 +307,8 @@ body {
 .fund-issue-table td:nth-child(4) { text-align: right; font-weight: 700; color: var(--빨강); white-space: nowrap; }
 .fund-issue-table td:nth-child(5) { color: var(--회색글자); font-size: 10px; }
 .fund-issue-type-tag { display: inline-block; padding: 1px 6px; border-radius: 99px; background: #FFF3E0; color: #A15C00; font-size: 10px; white-space: nowrap; }
+/* 과입금(빨강)과 선입금(검정)을 금액 색으로도 바로 구분: overpay 행이 아니면(=선입금 등) 금액은 검정 */
+.fund-issue-table tr:not(.overpay) td:nth-child(4) { color: var(--글자색); }
 .fund-issue-table tr.overpay td:nth-child(1),
 .fund-issue-table tr.overpay td:nth-child(3) { color: var(--빨강); }
 .fund-issue-table tr.overpay .fund-issue-type-tag { background: #FAE1DE; color: var(--빨강); }
@@ -864,7 +880,7 @@ body {
   font-size: 11px; font-weight: 700; background: #EEF3FB; color: var(--네이비);
 }
 .main-tab.active .tab-count { background: var(--네이비); color: #fff; }
-.outstanding-wrap { padding: 0 16px 16px; }
+.tab-body { padding: 0 16px 16px; }
 .search-result-box { max-height: 620px; overflow-y: auto; }
 .list-summary { padding: 12px 2px 8px; font-size: 12px; color: var(--글자색); }
 .list-summary-note { color: var(--회색글자); font-size: 10px; }
@@ -881,23 +897,12 @@ body {
 .co-sub { font-size: 10px; font-weight: 400; color: var(--회색글자); margin-top: 1px; }
 .cell-co { white-space: normal !important; }
 
-/* 최근 입금내역 표를 축소하고 남는 오른쪽 공간에 Top 5 악성 미수 거래처를 나란히 배치 */
-.deposit-split-row { display: flex; gap: 14px; align-items: flex-start; padding: 0 18px 18px; }
-.deposit-table-col { flex: 0 0 56%; min-width: 0; }
-.deposit-table-col .ledger-table-wrap { margin: 0; }
-.top-baddebt-col { flex: 1; min-width: 0; }
-
-.baddebt-panel {
-  background: var(--흰색);
-  border: 1px solid var(--테두리);
-  border-radius: 10px;
-  padding: 12px 14px;
-  height: 100%;
-}
-.baddebt-title { font-size: 12px; font-weight: 700; color: var(--글자색); margin-bottom: 8px; }
+/* 집중 관리 대상 카드(오른쪽 패널 #baddebt-card) - 위험/심각 미수를 가장 오래 끌고 있는
+   거래처 Top 10. 다른 카드보다 눈에 띄게 위쪽을 빨간 선으로 강조한다. */
 .baddebt-title-sub { font-size: 10px; font-weight: 500; color: var(--회색글자); }
 .baddebt-empty { font-size: 11px; color: var(--회색글자); padding: 10px 0; }
-.baddebt-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.baddebt-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.baddebt-table td:first-child { overflow-wrap: anywhere; font-weight: 600; }
 .baddebt-table thead th {
   text-align: left;
   font-size: 10px;
@@ -945,8 +950,12 @@ body {
   .kpi-title { font-size: 7px; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .kpi-sub { font-size: 7px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  /* 차트 2개: 좌우 → 위아래로 */
-  #chart-all, #chart-manager { flex-direction: column; }
+  /* 차트 2개: 좌우 → 위아래로. 3카드 그리드도 한 줄로 쌓되 순서는 [미수금 → 집중 관리 → 막대] */
+  #chart-manager { flex-direction: column; }
+  #chart-all { grid-template-columns: minmax(0, 1fr); }
+  #chart-all > .card-rank { grid-column: 1; grid-row: auto; order: 1; }
+  #chart-all > #baddebt-card { grid-column: 1; grid-row: auto; order: 2; }
+  #chart-all > .card-bar { grid-column: 1; grid-row: auto; order: 3; }
   .chart-wrap { height: 180px; }
 
   /* 결제조건/미수 상세내역 헤더 바 - 128px 정렬 그리드 대신 세로로 쌓기 */
@@ -1015,10 +1024,6 @@ body {
   /* 원장 테이블(날짜순 통합 등도 컬럼이 많아 옆으로 스크롤) */
   .ledger-table { font-size: 10px; }
 
-  /* 최근 입금내역 + Top5 악성 미수 - 좁은 화면에서는 좌우 분할 대신 위아래로 */
-  .deposit-split-row { flex-direction: column; padding: 0 12px 12px; }
-  .deposit-table-col { flex: 1 1 auto; width: 100%; }
-
   .trend-modal { width: 92vw; }
   .trend-modal-body { padding: 4px 12px 14px; }
 }
@@ -1059,7 +1064,7 @@ body {
   #table-body .ledger-table td,
   #table-body .ledger-table th { padding: 6px 6px; }
   .main-tab { padding: 10px 10px; font-size: 12px; }
-  .outstanding-wrap { padding: 0 10px 12px; }
+  .tab-body { padding: 0 10px 12px; }
   .scroll-box { max-height: 400px; }
 }
 
@@ -1279,6 +1284,7 @@ var chartBar = null, chartDonut = null, chartPaytypeDonut = null, chartPaytypeBa
   - formatDate(serial)       : 엑셀 날짜 시리얼 → YYYY-MM-DD
   - calcRisk(serial, paytype): 위험도 계산
   - renderFundIssues()       : 자금 특이사항(과입금/선입금) 렌더 - 필터와 무관하게 항상 표시
+  - setupChartAllLayout()    : 오른쪽 패널에 집중 관리 대상 카드를 붙이고 3개 카드(순위/막대/집중관리) 배치 클래스 부여
   - setMainTab(tab)          : 메인 카드의 탭 전환(최근 입금내역/미수 업체 리스트, 검색 시 미수현황/입금내역)
   - buildOutstandingTabHtml(): "미수 업체 리스트" 탭 내용 (액수 큰 순)
   - setLedgerDateThisMonth() : 원장 기간 필터 빠른 선택 - 당월 1일~말일
@@ -1381,6 +1387,7 @@ function init() {
   renderManagerFilter();
   renderPaytypeFilter();
   renderRiskFilter();
+  setupChartAllLayout();
   applyFilters();
   renderFundIssues();
   var btn = document.getElementById("expand-btn");
@@ -2048,8 +2055,8 @@ function buildTopBadDebtHtml() {
     .sort(function(a, b) { return b.maxDays - a.maxDays; })
     .slice(0, 10);
 
-  var html = '<div class="baddebt-panel">';
-  html += '<div class="baddebt-title">집중 관리 대상 <span class="baddebt-title-sub">(Top 10 최장 미회수 거래처)</span></div>';
+  // 오른쪽 패널 #baddebt-card 안에 들어가는 내용(제목 + 표). 다른 카드 제목과 같은 chart-title 모양.
+  var html = '<div class="chart-title">집중 관리 대상 <span class="baddebt-title-sub">(Top 10 최장 미회수 거래처)</span></div>';
   if (top10.length === 0) {
     html += '<div class="baddebt-empty">위험/심각 등급 미수금이 없습니다</div>';
   } else {
@@ -2065,8 +2072,30 @@ function buildTopBadDebtHtml() {
     });
     html += '</tbody></table>';
   }
-  html += '</div>';
   return html;
+}
+
+// ── 오른쪽 패널 #chart-all 안의 3개 카드 배치.
+//    [담당자별 미수금(순위 리스트) | 집중 관리 대상]
+//    [담당자별 미수금 현황(막대)   |  (집중 관리 대상 아래로 이어짐)]
+//    집중 관리 대상 카드는 매크로(정적 레이아웃)에 없으므로 여기서 한 번만 만들어 붙이고,
+//    순위/막대 카드는 안의 요소로 찾아 클래스를 달아 CSS 그리드가 위치를 잡게 한다
+//    (매크로가 만든 카드 순서가 어떻든 위치가 고정되도록 nth-child에 의존하지 않는다). ──
+function setupChartAllLayout() {
+  var host = document.getElementById('chart-all');
+  if (!host) return;
+  var rankEl = document.getElementById('manager-rank-list');
+  var barEl = document.getElementById('chart-bar');
+  if (rankEl && rankEl.closest('.chart-card')) rankEl.closest('.chart-card').classList.add('card-rank');
+  if (barEl && barEl.closest('.chart-card')) barEl.closest('.chart-card').classList.add('card-bar');
+  var card = document.getElementById('baddebt-card');
+  if (!card) {
+    card = document.createElement('div');
+    card.id = 'baddebt-card';
+    card.className = 'chart-card';
+    host.appendChild(card);
+  }
+  card.innerHTML = buildTopBadDebtHtml();
 }
 
 // ── 미수 테이블 렌더링 ──
@@ -2103,10 +2132,9 @@ function renderTable() {
     ], tab);
     var bodyHtml;
     if (tab === 'deposit') {
-      bodyHtml = '<div class="deposit-split-row"><div class="deposit-table-col">' + buildDepositListHtml(depositsInRange) +
-        '</div><div class="top-baddebt-col">' + buildTopBadDebtHtml() + '</div></div>';
+      bodyHtml = '<div class="tab-body">' + buildDepositListHtml(depositsInRange) + '</div>';
     } else {
-      bodyHtml = '<div class="outstanding-wrap">' + buildOutstandingTabHtml() + '</div>';
+      bodyHtml = '<div class="tab-body">' + buildOutstandingTabHtml() + '</div>';
     }
     tableContainer.innerHTML = tabsHtml + bodyHtml;
     return;
