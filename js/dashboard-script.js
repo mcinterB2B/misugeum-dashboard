@@ -1149,6 +1149,138 @@ function printLedger() {
 }
 
 // ── 원장 렌더링 (뷰 모드/기간 변경 시 재호출) ──
+// ── 원장: 완납된 매출이 "어떤 입금"으로 정산됐는지 연결 ──
+// 인보이스에는 수금일(paiddate)·입금액(paidamt)이, 입금 목록에는 날짜·금액이 있지만 둘을 직접
+// 잇는 키는 없다. 그래서 같은 수금일의 인보이스를 매출일 단위로 묶은 뒤, 그 날짜의 입금 금액과
+// "합계가 정확히 일치하는 묶음(최대 4개 조합)"을 찾아 짝지어 준다. 일치하는 게 없는데 그날 입금이
+// 단 한 건 남았으면 남은 묶음 전부를 그 입금의 정산분으로 추정한다. 짝을 못 찾으면 수금일만 표시.
+// 반환: invDep (인보이스 → 입금), depInv (입금 → 인보이스 배열), approx (추정 매칭된 입금 집합)
+function buildSettlement(company) {
+  var recs = DATA.records.filter(function(r) { return r.company === company && r.paiddate > 0 && r.paidamt > 0; });
+  var deps = (DATA.deposits || []).filter(function(d) { return d.company === company; });
+  var invDep = new Map(), depInv = new Map(), approx = new Set();
+
+  var byDate = {};
+  recs.forEach(function(r) { (byDate[r.paiddate] = byDate[r.paiddate] || []).push(r); });
+
+  // size개 묶음의 합이 target과 정확히 같은 조합을 찾는다
+  function findCombo(avail, target, size) {
+    var found = null;
+    (function dfs(start, chosen, sum) {
+      if (found) return;
+      if (chosen.length === size) { if (sum === target) found = chosen.slice(); return; }
+      for (var i = start; i < avail.length && !found; i++) {
+        if (sum + avail[i].sum > target) continue;
+        chosen.push(avail[i]); dfs(i + 1, chosen, sum + avail[i].sum); chosen.pop();
+      }
+    })(0, [], 0);
+    return found;
+  }
+
+  Object.keys(byDate).forEach(function(k) {
+    var day = parseInt(k, 10);
+    var dayDeps = deps.filter(function(d) { return d.date === day; }).sort(function(a, b) { return b.amount - a.amount; });
+    if (!dayDeps.length) return;
+    var gm = {};
+    byDate[k].forEach(function(r) {
+      var g = gm[r.saledate] || (gm[r.saledate] = { sale: r.saledate, sum: 0, recs: [] });
+      g.sum += r.paidamt; g.recs.push(r);
+    });
+    var avail = Object.keys(gm).map(function(s) { return gm[s]; });
+
+    function link(dep, groups, isApprox) {
+      groups.forEach(function(g) {
+        g.recs.forEach(function(r) { invDep.set(r, dep); });
+        depInv.set(dep, (depInv.get(dep) || []).concat(g.recs));
+        avail.splice(avail.indexOf(g), 1);
+      });
+      if (isApprox) approx.add(dep);
+    }
+    // 묶음 1개로 설명되는 입금부터, 그다음 2개, 3개, 4개 조합 순으로 짝짓는다. 큰 입금부터 조합을
+    // 찾으면 다른 입금의 정답 묶음을 가로채 엉뚱한 조합(예: 합이 우연히 같은 두 묶음)으로 연결되기 때문.
+    var unmatched = dayDeps.slice();
+    for (var size = 1; size <= 4; size++) {
+      unmatched = unmatched.filter(function(dep) {
+        var combo = findCombo(avail, dep.amount, size);
+        if (combo) { link(dep, combo, false); return false; }
+        return true;
+      });
+    }
+    if (unmatched.length === 1 && avail.length) {
+      var restSum = avail.reduce(function(s, g) { return s + g.sum; }, 0);
+      link(unmatched[0], avail.slice(), restSum !== unmatched[0].amount);
+    }
+  });
+  return { invDep: invDep, depInv: depInv, approx: approx };
+}
+
+// 원장 한 번 그릴 때의 보조 정보(정산 연결, 행 id) - renderLedger가 채우고 두 뷰가 읽는다
+var ledgerView = { settle: null, saleIds: new Map(), depIds: new Map() };
+
+function shortMD(serial) { return formatDate(serial).slice(5).replace('-', '/'); }
+
+// 연결된 행을 눌렀을 때 그 행으로 스크롤하고 잠깐 강조 (정산된 입금 ↔ 매출 서로 찾아가기)
+function flashLedgerRows(ids) {
+  var first = null;
+  ids.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (!first) first = el;
+    el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+    setTimeout(function() { el.classList.remove('flash'); }, 2200);
+  });
+  if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// 매출 한 건의 상태: 구분 칩 + 행 클래스 + 미수금 칸 내용. 이월(조회 시작일 이전 매출)이면 칩에
+// "이월"을 붙여, 이월 미수와 이월 후 완납을 한눈에 구분한다.
+function saleStatus(r) {
+  var raw = r._src || r;
+  var carry = !!r.carried;
+  var dep = ledgerView.settle ? ledgerView.settle.invDep.get(raw) : null;
+  if (r.misooamt > 0) {
+    return { rowCls: 'sale-unpaid unpaid',
+      chip: '<span class="lg-chip ' + (carry ? 'carry-unpaid' : 'unpaid') + '">' + (carry ? '이월 미수' : '미수') + '</span>',
+      misoo: '<span style="color:#C0392B;font-weight:700">' + formatAmountFull(r.misooamt) + '</span>' };
+  }
+  if (r.misooamt < 0) {
+    return { rowCls: 'sale-adjust',
+      chip: '<span class="lg-chip adjust">조정</span>',
+      misoo: '<span style="color:#0F7B52">' + formatAmountFull(r.misooamt) + '</span>' };
+  }
+  // 완납 - 언제, 어떤 입금으로 정산됐는지를 아래 줄에 붙인다
+  var sub = '';
+  if (r.paiddate > 0) {
+    if (dep) {
+      var did = ledgerView.depIds.get(dep);
+      var txt = shortMD(dep.date) + ' 입금 ' + formatAmountFull(dep.amount) + (ledgerView.settle.approx.has(dep) ? ' (추정)' : '');
+      sub = did ? '<span class="settle-link" onclick="flashLedgerRows([\'' + did + '\'])" title="클릭하면 해당 입금 행으로 이동">' + txt + ' ↗</span>'
+                : '<span class="settle-sub">' + txt + '</span>';
+    } else {
+      sub = '<span class="settle-sub">' + shortMD(r.paiddate) + ' 수금</span>';
+    }
+  }
+  return { rowCls: 'sale-paid',
+    chip: '<span class="lg-chip ' + (carry ? 'carry-paid' : 'paid') + '">' + (carry ? '이월 → 완납' : '완납') + '</span>',
+    misoo: '<span style="color:#0F7B52;font-weight:600">완납</span>' + (sub ? '<div class="settle-line">' + sub + '</div>' : '') };
+}
+
+// 입금 한 건이 정산한 매출을 요약 ("↳ 09/29 매출 2건 정산"). 화면에 보이는 매출 행으로 바로 이동 가능.
+function depositSettleNote(d) {
+  if (!ledgerView.settle) return '';
+  var invs = ledgerView.settle.depInv.get(d);
+  if (!invs || !invs.length) return '';
+  var dates = [];
+  invs.forEach(function(r) { if (dates.indexOf(r.saledate) < 0) dates.push(r.saledate); });
+  dates.sort(function(a, b) { return a - b; });
+  var label = dates.slice(0, 2).map(shortMD).join('·') + (dates.length > 2 ? ' 외 ' + (dates.length - 2) + '일' : '');
+  var ids = [];
+  invs.forEach(function(r) { var id = ledgerView.saleIds.get(r); if (id) ids.push(id); });
+  var txt = '↳ ' + label + ' 매출 ' + invs.length + '건 정산' + (ledgerView.settle.approx.has(d) ? ' (추정)' : '');
+  return ids.length ? '<span class="settle-link" onclick="flashLedgerRows([' + ids.map(function(i) { return "'" + i + "'"; }).join(',') + '])" title="클릭하면 해당 매출 행으로 이동">' + txt + '</span>'
+                    : '<span class="settle-sub">' + txt + '</span>';
+}
+
 function renderLedger() {
   var companyName = ledgerState.company;
   if (!companyName) return;
@@ -1181,6 +1313,7 @@ function renderLedger() {
         var copy = {};
         for (var k in r) copy[k] = r[k];
         copy.carried = true;
+        copy._src = r;   // 정산 연결/행 id 조회용으로 원본 레코드를 가리켜 둔다
         carriedRecords.push(copy);
       }
     });
@@ -1193,6 +1326,11 @@ function renderLedger() {
 
   allRecords.sort(function(a, b) { return a.saledate - b.saledate; });
   depositRecords.sort(function(a, b) { return a.date - b.date; });
+
+  // 완납 매출 ↔ 정산 입금 연결과, 서로 찾아가기용 행 id (기간 필터와 무관하게 거래처 전체로 매칭)
+  ledgerView = { settle: buildSettlement(companyName), saleIds: new Map(), depIds: new Map() };
+  allRecords.forEach(function(r, i) { ledgerView.saleIds.set(r._src || r, 'lg-s' + i); });
+  depositRecords.forEach(function(d, i) { ledgerView.depIds.set(d, 'lg-d' + i); });
 
   var manager = allRecords.length > 0 ? allRecords[0].manager : '-';
   var paytype = allRecords.length > 0 ? allRecords[0].paytype : '-';
@@ -1250,7 +1388,9 @@ function renderLedger() {
   html += '<div class="ledger-sum-item"><div class="ledger-sum-label">미수 잔액</div><div class="ledger-sum-value" style="color:#C0392B">' + formatAmountFull(totalMisoo) + '</div></div>';
   html += '</div>';
   if (carriedRecords.length) {
-    html += '<div class="ledger-carry-note">※ 조회 시작일 이전에 매출이 발생했지만 아직 미수이거나 이 기간에 입금된 건은 <span class="ledger-badge carry">이월</span>로 함께 표시됩니다.</div>';
+    html += '<div class="ledger-carry-note">※ 조회 시작일 이전에 매출이 났지만 아직 미수이거나 이 기간에 입금된 건은 이월로 함께 표시됩니다. ' +
+      '<span class="lg-chip carry-unpaid">이월 미수</span> 기초 미수가 아직 남은 건 · ' +
+      '<span class="lg-chip carry-paid">이월 → 완납</span> 기초 미수였다가 이 기간 입금으로 정산된 건(수금일·입금액 표시, 누르면 해당 입금 행으로 이동)</div>';
   }
 
   // ── 뷰 모드별 테이블 ──
@@ -1321,25 +1461,13 @@ function renderLedgerSplit(records, deposits) {
   // AF열이 마이너스인 행은 반품/과입금 상계 같은 조정 건이라 "완납"이 아니라 실제 마이너스
   // 금액을 그대로 보여줘야 한다(전에는 <=0이면 전부 "완납"으로 표시해서 조정 내역이 안 보였음).
   function saleRowHtml(r) {
-    var badge, rowCls, amtHtml;
-    if (r.misooamt > 0) {
-      badge = '<span class="ledger-badge unpaid">미수</span>';
-      rowCls = 'ledger-row unpaid';
-      amtHtml = '<span style="color:#C0392B">' + formatAmountFull(r.misooamt) + '</span>';
-    } else if (r.misooamt < 0) {
-      badge = '<span class="ledger-badge paid">조정</span>';
-      rowCls = '';
-      amtHtml = '<span style="color:#0F7B52">' + formatAmountFull(r.misooamt) + '</span>';
-    } else {
-      badge = '<span class="ledger-badge paid">완납</span>';
-      rowCls = '';
-      amtHtml = '<span style="color:#0F7B52">완납</span>';
-    }
-    return '<tr class="' + rowCls + '">' +
-      '<td>' + formatDate(r.saledate) + (r.carried ? ' <span class="ledger-badge carry">이월</span>' : '') + '</td>' +
-      '<td>' + (r.origin || '-') + ' / ' + (r.product || '-') + ' ' + badge + '</td>' +
+    var st = saleStatus(r);
+    var sid = ledgerView.saleIds.get(r._src || r);
+    return '<tr id="' + sid + '" class="ledger-row ' + st.rowCls + '">' +
+      '<td>' + formatDate(r.saledate) + '</td>' +
+      '<td>' + (r.origin || '-') + ' / ' + (r.product || '-') + ' ' + st.chip + '</td>' +
       '<td style="text-align:right">' + formatAmountFull(r.saleamt) + '</td>' +
-      '<td style="text-align:right;font-weight:500">' + amtHtml + '</td>' +
+      '<td style="text-align:right">' + st.misoo + '</td>' +
       '</tr>';
   }
   function saleSubtotalHtml(label, group, kind) {
@@ -1357,10 +1485,11 @@ function renderLedgerSplit(records, deposits) {
 
   // 입금 행 (실제 입금 건별로 1행씩)
   function depositRowHtml(d) {
-    return '<tr class="ledger-row deposit">' +
+    var note = depositSettleNote(d);
+    return '<tr id="' + ledgerView.depIds.get(d) + '" class="ledger-row deposit">' +
       '<td>' + formatDate(d.date) + '</td>' +
-      '<td>' + depositSourceLabel(d.source) + '</td>' +
-      '<td style="text-align:right;color:#0F7B52;font-weight:500">' + formatAmountFull(d.amount) + '</td>' +
+      '<td><span class="lg-chip deposit">입금</span> ' + depositSourceLabel(d.source) + (note ? '<div class="settle-line">' + note + '</div>' : '') + '</td>' +
+      '<td style="text-align:right;color:#0F7B52;font-weight:600">' + formatAmountFull(d.amount) + '</td>' +
       '</tr>';
   }
   function depositSubtotalHtml(label, group, kind) {
@@ -1413,41 +1542,35 @@ function renderLedgerCombined(records, deposits) {
 
   // AF열(미수금) 부호로 완납/미수/조정 판정 - 마이너스는 반품·과입금 상계 같은 조정 건이라
   // "완납"이 아니라 실제 마이너스 금액을 그대로 보여준다.
+  // 행 종류가 첫눈에 보이도록 "구분" 칩 열(미수=빨강, 입금=초록, 완납/이월 완납=회색)을 두고, 행 왼쪽에
+  // 같은 색 띠를 붙인다. 완납 매출에는 어떤 입금으로 정산됐는지, 입금에는 어떤 매출을 정산했는지 연결한다.
   function itemRowHtml(item) {
     if (item.type === 'sale') {
-      var r = item.r;
-      var badge, misooColor, misooText;
-      if (r.misooamt > 0) {
-        badge = '<span class="ledger-badge unpaid">미수</span>';
-        misooColor = '#C0392B'; misooText = formatAmountFull(r.misooamt);
-      } else if (r.misooamt < 0) {
-        badge = '<span class="ledger-badge paid">조정</span>';
-        misooColor = '#0F7B52'; misooText = formatAmountFull(r.misooamt);
-      } else {
-        badge = '<span class="ledger-badge paid">완납</span>';
-        misooColor = '#0F7B52'; misooText = '완납';
-      }
-      var rowCls = r.misooamt > 0 ? 'ledger-row unpaid' : '';
-      return '<tr class="' + rowCls + '">' +
-        '<td>' + formatDate(r.saledate) + (r.carried ? ' <span class="ledger-badge carry">이월</span>' : '') + '</td>' +
+      var r = item.r, st = saleStatus(r);
+      var sid = ledgerView.saleIds.get(r._src || r);
+      return '<tr id="' + sid + '" class="ledger-row ' + st.rowCls + '">' +
+        '<td>' + formatDate(r.saledate) + '</td>' +
+        '<td>' + st.chip + '</td>' +
         '<td>' + (r.origin || '-') + '</td>' +
-        '<td>' + (r.product || '-') + ' ' + badge + '</td>' +
+        '<td>' + (r.product || '-') + '</td>' +
         '<td style="text-align:center">' + formatAmountFull(r.unitprice) + '</td>' +
         '<td style="text-align:center">' + (r.qty || 0).toLocaleString('ko-KR') + '</td>' +
         '<td style="text-align:right">' + formatAmountFull(r.saleamt) + '</td>' +
         '<td style="text-align:right">-</td>' +
-        '<td style="text-align:right;color:' + misooColor + ';font-weight:500">' + misooText + '</td>' +
+        '<td style="text-align:right">' + st.misoo + '</td>' +
         '</tr>';
     }
     var d = item.d;
-    return '<tr class="ledger-row deposit">' +
+    var note = depositSettleNote(d);
+    return '<tr id="' + ledgerView.depIds.get(d) + '" class="ledger-row deposit">' +
       '<td>' + formatDate(d.date) + '</td>' +
+      '<td><span class="lg-chip deposit">입금</span></td>' +
       '<td>-</td>' +
-      '<td>입금 ' + depositSourceLabel(d.source) + '</td>' +
+      '<td>' + depositSourceLabel(d.source) + (note ? '<div class="settle-line">' + note + '</div>' : '') + '</td>' +
       '<td style="text-align:center">-</td>' +
       '<td style="text-align:center">-</td>' +
       '<td style="text-align:right">-</td>' +
-      '<td style="text-align:right;color:#0F7B52;font-weight:500">' + formatAmountFull(d.amount) + '</td>' +
+      '<td style="text-align:right;color:#0F7B52;font-weight:600">' + formatAmountFull(d.amount) + '</td>' +
       '<td style="text-align:right">-</td>' +
       '</tr>';
   }
@@ -1458,14 +1581,14 @@ function renderLedgerCombined(records, deposits) {
       else { paid += item.d.amount; }
     });
     return '<tr class="ledger-row subtotal ' + kind + '">' +
-      '<td colspan="5">' + label + '</td>' +
+      '<td colspan="6">' + label + '</td>' +
       '<td style="text-align:right">' + formatAmountFull(sale) + '</td>' +
       '<td style="text-align:right">' + formatAmountFull(paid) + '</td>' +
       '<td style="text-align:right">' + formatAmountFull(misoo) + '</td>' +
       '</tr>';
   }
   var rows = items.length === 0
-    ? '<tr><td colspan="8" style="text-align:center;padding:20px;color:#6B7A94">내역 없음</td></tr>'
+    ? '<tr><td colspan="9" style="text-align:center;padding:20px;color:#6B7A94">내역 없음</td></tr>'
     : buildRowsWithSubtotals(items, function(item) { return item.date; }, itemRowHtml, itemSubtotalHtml);
 
   var totalSale  = records.reduce(function(s,r){return s+r.saleamt;},0);
@@ -1475,16 +1598,16 @@ function renderLedgerCombined(records, deposits) {
   var html = '<div class="ledger-table-wrap">';
   html += '<table class="ledger-table">';
   html += '<thead><tr>';
-  html += '<th>날짜</th><th>원산지</th><th>품목명</th>';
-  html += '<th>매출단가(원/kg)</th>';
-  html += '<th>총 수량(Kg)</th>';
+  html += '<th>날짜</th><th>구분</th><th>원산지</th><th>품목명 / 입금처</th>';
+  html += '<th>단가(원/kg)</th>';
+  html += '<th>수량(Kg)</th>';
   html += '<th>매출액</th>';
   html += '<th>입금액</th>';
   html += '<th>미수금</th>';
   html += '</tr></thead>';
   html += '<tbody>' + rows + '</tbody>';
   html += '<tfoot><tr class="ledger-foot">';
-  html += '<td colspan="5">합계</td>';
+  html += '<td colspan="6">합계</td>';
   html += '<td style="text-align:right">' + formatAmountFull(totalSale) + '</td>';
   html += '<td style="text-align:right;color:#0F7B52">' + formatAmountFull(totalPaid) + '</td>';
   html += '<td style="text-align:right;color:#C0392B">' + formatAmountFull(totalMisoo) + '</td>';

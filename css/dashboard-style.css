@@ -531,11 +531,35 @@ body {
 .ledger-table tbody tr { border-top: 1px solid var(--테두리); }
 .ledger-table td { padding: 6px 10px; white-space: nowrap; }
 
-/* 행 상태별 배경색 - 원장이 길어지면 원색이 눈을 피로하게 해서, 색상 대신 무채색
-   음영 단계로만 구분한다(진할수록 주의가 필요한 상태: 미입금 > 부분입금 > 입금완료). */
-.ledger-row.deposit { background: rgba(27,58,107,.025); }
-.ledger-row.partial  { background: rgba(27,58,107,.06); }
-.ledger-row.unpaid   { background: rgba(27,58,107,.04); }
+/* 행 종류 구분 - 배경 음영만으로는 미수/입금이 눈에 안 들어와서, 행 왼쪽 색 띠 + "구분" 칩으로
+   구분한다. 배경은 눈이 피로하지 않게 아주 옅은 틴트만 쓴다(미수=옅은 빨강, 입금=옅은 초록,
+   완납/조정 매출은 흰 바탕). 띠: 미수=빨강, 입금=초록, 완납=회색, 조정=황색. */
+.ledger-row.unpaid   { background: rgba(192,57,43,.05); }
+.ledger-row.deposit  { background: rgba(15,123,82,.07); }
+.ledger-row.sale-unpaid td:first-child { box-shadow: inset 4px 0 0 #C0392B; }
+.ledger-row.deposit td:first-child     { box-shadow: inset 4px 0 0 #0F7B52; }
+.ledger-row.sale-paid td:first-child   { box-shadow: inset 4px 0 0 #B8C2CF; }
+.ledger-row.sale-adjust td:first-child { box-shadow: inset 4px 0 0 #D9A400; }
+.ledger-row.flash td { animation: lgflash 2.2s ease; }
+@keyframes lgflash { 0%, 55% { background: #FFE98A; } 100% { background: transparent; } }
+
+/* 구분 칩 */
+.lg-chip {
+  display: inline-block; padding: 2px 9px; border-radius: 99px;
+  font-size: 10px; font-weight: 700; white-space: nowrap; line-height: 1.5;
+}
+.lg-chip.unpaid       { background: #C0392B; color: #fff; }
+.lg-chip.deposit      { background: #0F7B52; color: #fff; }
+.lg-chip.paid         { background: #E4E8EE; color: #3F4B5B; }
+.lg-chip.adjust       { background: #F3E3B8; color: #7A5A00; }
+.lg-chip.carry-unpaid { background: #fff; color: #C0392B; border: 1px solid #C0392B; }
+.lg-chip.carry-paid   { background: #EEF1F5; color: #3F4B5B; border: 1px dashed #8D99AA; }
+/* 완납/입금 행의 정산 연결 설명 (어떤 입금으로 정산됐는지 / 어떤 매출을 정산했는지) */
+.settle-line { margin-top: 2px; font-size: 10px; font-weight: 400; line-height: 1.4; white-space: normal; max-width: 150px; }
+#ledger-panel .ledger-table td, #ledger-panel .ledger-table th { padding-left: 6px; padding-right: 6px; }
+.settle-sub { color: var(--회색글자); }
+.settle-link { color: #2554A0; cursor: pointer; text-decoration: underline dotted; }
+.settle-link:hover { text-decoration: underline; }
 /* 원장 소계 행(일별/월별 - 매출/입금 분리, 날짜순 통합 두 뷰 공통) - 위아래 상세
    내역과 섞이지 않도록 뚜렷하게 구분. 월별 소계를 더 진하게, 일별 소계는 한 단계
    옅게 둬서 자주 나오는 일별 소계가 화면을 너무 무겁게 만들지 않도록 한다. */
