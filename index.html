@@ -880,7 +880,30 @@ body {
   font-size: 11px; font-weight: 700; background: #EEF3FB; color: var(--네이비);
 }
 .main-tab.active .tab-count { background: var(--네이비); color: #fff; }
-.tab-body { padding: 0 16px 16px; }
+/* 메인 카드 본문: 왼쪽 목록(약 56%) + 오른쪽 "수금 예정 임박" 카드. 목록 폭을 좁게 둬야 거래처명과
+   금액 사이가 안 벌어져 시선이 좌우로 덜 움직인다. 옆 카드는 목록 높이에 맞춰 늘어난다. */
+.tab-split { display: flex; gap: 14px; align-items: stretch; padding: 0 18px 18px; }
+.tab-main { flex: 0 0 56%; min-width: 0; }
+.tab-side { flex: 1; min-width: 0; display: flex; }
+.side-card {
+  flex: 1; min-width: 0; margin-top: 12px;
+  background: var(--흰색); border: 1px solid var(--테두리); border-top: 3px solid #2554A0;
+  border-radius: 10px; padding: 12px 14px;
+}
+.duesoon-list { max-height: 360px; overflow-y: auto; }
+.duesoon-row {
+  display: flex; align-items: center; gap: 8px; padding: 7px 0; cursor: pointer;
+  border-top: 1px solid var(--테두리); font-size: 12px;
+}
+.duesoon-row:first-child { border-top: none; }
+.duesoon-row:hover .duesoon-name { text-decoration: underline; }
+.duesoon-d {
+  flex-shrink: 0; min-width: 40px; text-align: center; padding: 2px 6px; border-radius: 99px;
+  font-size: 10px; font-weight: 700; background: #EEF3FB; color: var(--네이비);
+}
+.duesoon-d.soon { background: #FAE1DE; color: var(--빨강); }
+.duesoon-name { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.duesoon-amt { flex-shrink: 0; font-weight: 700; white-space: nowrap; }
 .search-result-box { max-height: 620px; overflow-y: auto; }
 .list-summary { padding: 12px 2px 8px; font-size: 12px; color: var(--글자색); }
 .list-summary-note { color: var(--회색글자); font-size: 10px; }
@@ -1064,7 +1087,10 @@ body {
   #table-body .ledger-table td,
   #table-body .ledger-table th { padding: 6px 6px; }
   .main-tab { padding: 10px 10px; font-size: 12px; }
-  .tab-body { padding: 0 10px 12px; }
+  /* 폰에서는 목록과 수금 예정 임박 카드를 좌우 대신 위아래로 */
+  .tab-split { flex-direction: column; padding: 0 10px 12px; }
+  .tab-main { flex: 1 1 auto; width: 100%; }
+  .tab-side { width: 100%; }
   .scroll-box { max-height: 400px; }
 }
 
@@ -1667,7 +1693,7 @@ function renderTrendWidget() {
   // 이므로 당월 수금 예정에도 지연 미수금에도 넣지 않는다). 만기일이 이미 지난 건은 지연
   // 미수금으로, 만기일이 다음 달 이후인 건은 두 버킷 어디에도 넣지 않아 서로 안 겹치게 한다.
   //   7일이내 결제 → 매출일+20일 / 월말결제 → +30일 / 익월 10일결제 → +40일 / 익월말 → +50일
-  var COLLECTION_DUE_DAYS = { "7일이내 결제": 20, "월말결제": 30, "익월 10일결제": 40, "익월말": 50 };
+  //   (이 기준표는 파일 위쪽 전역 COLLECTION_DUE_DAYS - "수금 예정 임박" 카드와 같은 기준을 쓴다)
   var todaySerial = dateToSerial(DATA.today);
   var todayYM = serialToYM(todaySerial);
   var dueThisMonth = 0, overdue = 0;
@@ -1945,6 +1971,61 @@ function buildDepositDateFilterHtml() {
     '<button class="ledger-date-reset" onclick="resetDepositDate()">최근 7일</button>';
 }
 
+// 결제조건별 "정상 수금 기한"(매출일 + 며칠). 당월 수금 예정/지연 미수금 판정과 수금 예정 임박 카드가
+// 같은 기준을 쓰도록 한 곳에 둔다.
+var COLLECTION_DUE_DAYS = { "7일이내 결제": 20, "월말결제": 30, "익월 10일결제": 40, "익월말": 50 };
+
+// ── 수금 예정 임박 카드: 앞으로 N일 안에 수금 기한이 도래하는 미수를 거래처 단위로 모아, 만기가
+//    가까운 순으로 보여준다. "이번 주에 누구에게 연락해서 수금해야 하나"를 한눈에 보는 용도.
+//    (이미 기한이 지난 건은 집중 관리 대상/지연 미수금에서 다루므로 여기선 제외) ──
+var dueSoonWindow = 7;
+
+function getDueSoon(windowDays) {
+  var today = dateToSerial(DATA.today);
+  var by = {};
+  DATA.records.forEach(function(r) {
+    if (r.misooamt <= 0) return;
+    var due = r.saledate + (COLLECTION_DUE_DAYS[r.paytype] || 30);
+    if (due < today || due > today + windowDays) return;
+    var c = by[r.company] || (by[r.company] = { name: r.company, manager: r.manager, amount: 0, due: due });
+    c.amount += r.misooamt;
+    if (due < c.due) c.due = due;
+  });
+  return Object.keys(by).map(function(k) { return by[k]; })
+    .sort(function(a, b) { return a.due - b.due || b.amount - a.amount; });
+}
+
+function buildDueSoonInner() {
+  var today = dateToSerial(DATA.today);
+  var list = getDueSoon(dueSoonWindow);
+  var total = list.reduce(function(s, c) { return s + c.amount; }, 0);
+  var html = '<div class="chart-title">수금 예정 임박 <span class="baddebt-title-sub">(만기 도래 거래처)</span></div>';
+  html += '<div class="rank-filter-bar">' + [3, 7, 14].map(function(n) {
+    return '<button class="rank-filter-btn' + (n === dueSoonWindow ? ' selected' : '') + '" onclick="setDueSoonWindow(' + n + ')">' + n + '일 내</button>';
+  }).join('') + '</div>';
+  if (list.length === 0) {
+    return html + '<div class="baddebt-empty">' + dueSoonWindow + '일 안에 만기가 도래하는 미수가 없습니다</div>';
+  }
+  html += '<div class="list-summary" style="padding-top:2px">만기 도래 <b>' + list.length + '개사</b> · 합계 <b>' + formatAmountFull(total) + '</b></div>';
+  html += '<div class="duesoon-list">' + list.map(function(c) {
+    var d = c.due - today;
+    var dLabel = d === 0 ? '오늘' : 'D-' + d;
+    var cls = d <= 1 ? ' soon' : '';
+    var md = formatDate(c.due).slice(5);
+    return '<div class="duesoon-row" onclick="showLedger(\'' + c.name.replace(/'/g, "\\'") + '\')" title="클릭하면 거래처 원장으로 이동">' +
+      '<span class="duesoon-d' + cls + '">' + dLabel + '</span>' +
+      '<span class="duesoon-name">' + c.name + '<span class="co-sub">' + (c.manager || '-') + ' · 만기 ' + md + '</span></span>' +
+      '<span class="duesoon-amt">' + formatAmountFull(c.amount) + '</span></div>';
+  }).join('') + '</div>';
+  return html;
+}
+
+function setDueSoonWindow(n) {
+  dueSoonWindow = n;
+  var card = document.getElementById('duesoon-card');
+  if (card) card.innerHTML = buildDueSoonInner();
+}
+
 // ── 메인 카드 탭 상태: 평소(검색 없음)에는 입금내역/미수 업체 리스트, 검색 중에는
 //    미수현황/입금내역을 오간다. 검색어를 지우면 평소 탭으로 돌아온다. ──
 var mainTabs = { normal: 'deposit', search: 'outstanding' };
@@ -2031,7 +2112,7 @@ function buildOutstandingTabHtml() {
       '<td style="white-space:nowrap"><span class="risk-dot ' + risk.level + '"></span>D+' + risk.days + '일</td></tr>';
   }).join('');
   return '<div class="list-summary">미수 거래처 <b>' + list.length + '개사</b> · 합계 <b style="color:var(--빨강)">' + formatAmountFull(total) + '</b>' +
-      '<span class="list-summary-note"> (거래처명을 누르면 원장, 위 검색창에 입력하면 상세 미수현황)</span></div>' +
+      '<span class="list-summary-note"> (거래처명 클릭 → 원장)</span></div>' +
     '<div class="ledger-table-wrap scroll-box"><table class="ledger-table">' +
     '<thead><tr><th>거래처</th><th style="text-align:right">미수금</th><th>최장 경과</th></tr></thead>' +
     '<tbody>' + rows + '</tbody></table></div>';
@@ -2132,10 +2213,14 @@ function renderTable() {
     ], tab);
     var bodyHtml;
     if (tab === 'deposit') {
-      bodyHtml = '<div class="tab-body">' + buildDepositListHtml(depositsInRange) + '</div>';
+      bodyHtml = buildDepositListHtml(depositsInRange);
     } else {
-      bodyHtml = '<div class="tab-body">' + buildOutstandingTabHtml() + '</div>';
+      bodyHtml = buildOutstandingTabHtml();
     }
+    // 목록은 예전처럼 카드의 약 56% 폭으로 좁게(거래처명과 금액 사이가 너무 벌어지면 시선이 좌우로
+    // 계속 움직여야 해서) 두고, 남는 오른쪽 칸에는 "수금 예정 임박" 카드를 놓는다.
+    bodyHtml = '<div class="tab-split"><div class="tab-main">' + bodyHtml + '</div>' +
+      '<div class="tab-side"><div id="duesoon-card" class="side-card">' + buildDueSoonInner() + '</div></div></div>';
     tableContainer.innerHTML = tabsHtml + bodyHtml;
     return;
   }
