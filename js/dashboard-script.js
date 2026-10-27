@@ -123,6 +123,9 @@ function renderFundIssues() {
 
 // ── 초기화 ──
 function init() {
+  // 메인 화면 검색창이 "입금내역 필터"로만 보이던 것을, 미수현황 조회용임이 드러나게 안내
+  var mainSearch = document.getElementById("search-box");
+  if (mainSearch) mainSearch.placeholder = "거래처명 검색 → 미수현황";
   document.getElementById("date-badge").textContent = "기준일: " + DATA.today;
   document.getElementById("count-badge").textContent = "총 " + DATA.companies.length + "개 거래처";
   setDefaultDepositDateRange();
@@ -827,14 +830,18 @@ function buildTopBadDebtHtml() {
 
 // ── 미수 테이블 렌더링 ──
 function renderTable() {
-  var searchQuery = document.getElementById("search-box").value.toLowerCase();
+  var rawQuery = document.getElementById("search-box").value.trim();
+  var searchQuery = rawQuery.toLowerCase();
   var expandBtn = document.getElementById("expand-btn");
   var popupBtn = document.getElementById("popup-btn");
   var colHeader = document.querySelector(".column-header");
   var dateFilterEl = document.getElementById("deposit-date-filter");
   var isAllFilter = filter.manager === "전체" && filter.paytype === "전체" && filter.risk === "전체";
+  // 메인 화면(필터 전부 "전체")에서 거래처명을 검색하면, 담당자 이름을 먼저 눌러 들어가지 않아도
+  // 바로 그 거래처의 미수현황이 나오도록 최근 입금내역 대신 미수 상세내역으로 전환한다.
+  var isMainSearch = isAllFilter && searchQuery !== '';
 
-  if (isAllFilter) {
+  if (isAllFilter && !isMainSearch) {
     // 필터가 전부 "전체"일 때는 미수내역 대신 최근 입금내역을 보여줌
     setKpiText("table-title", "최근 입금내역");
     if (expandBtn) expandBtn.style.display = "none";
@@ -852,7 +859,8 @@ function renderTable() {
   if (popupBtn) popupBtn.style.display = "";
   if (colHeader) colHeader.style.display = "";
   if (dateFilterEl) dateFilterEl.style.display = "none";
-  setKpiText("table-title", filter.manager === "전체" ? "전체 미수내역" : filter.manager + " 담당 미수내역");
+  setKpiText("table-title", isMainSearch ? "'" + rawQuery + "' 미수현황"
+    : filter.manager === "전체" ? "전체 미수내역" : filter.manager + " 담당 미수내역");
 
   var records = DATA.records.filter(function(r) {
     // 완납(잔액 0)인 건만 제외. 마이너스(반품/과입금 상계 등 조정) 건은 포함시켜서 거래처
@@ -865,8 +873,12 @@ function renderTable() {
     return true;
   });
   var container = document.getElementById("table-body");
+  // 검색 결과일 때는 미수 표 아래에 그 거래처의 최근 입금도 같이 보여준다(완납 거래처는 미수가 없어서 입금만 보임)
+  var searchDepositHtml = isMainSearch ? buildSearchDepositHtml(searchQuery) : '';
   if (records.length === 0) {
-    container.innerHTML = '<div style="padding:40px;text-align:center;color:#6B7A94">데이터 없음</div>';
+    container.innerHTML = '<div style="padding:40px;text-align:center;color:#6B7A94">' +
+      (isMainSearch ? "'" + rawQuery.replace(/</g, '&lt;') + "' 거래처의 미수 내역이 없습니다 (완납이거나 없는 거래처)" : '데이터 없음') +
+      '</div>' + searchDepositHtml;
     return;
   }
   var byPaytype = {};
@@ -896,7 +908,8 @@ function renderTable() {
     html += '<div class="paytype-sidebar-total">' + formatAmountFull(paytypeTotal) + '</div>';
     html += '</div>';
 
-    var bodyClass = isAllExpanded ? "paytype-body" : "paytype-body collapsed";
+    // 검색 결과는 접힌 채로 두면 찾던 거래처가 안 보이므로 항상 펼쳐서 보여준다
+    var bodyClass = (isAllExpanded || isMainSearch) ? "paytype-body" : "paytype-body collapsed";
     html += '<div class="' + bodyClass + '" id="group-' + ptIdx + '">';
 
     // 거래처명을 결제조건 사이드바 바로 옆 칸(rowspan)으로 넣기 위해, 그룹 전체를 표 하나로 만든다
@@ -952,7 +965,30 @@ function renderTable() {
     html += '</div>'; // paytype-row 끝
     html += '</div>'; // paytype-group 끝
   });
-  container.innerHTML = html;
+  container.innerHTML = html + searchDepositHtml;
+}
+
+// ── 메인 화면 거래처 검색 결과 아래에 붙는 "최근 입금내역" - 검색어에 해당하는 거래처의 입금만,
+//    최신순 20건까지. (전체 기간 내역은 거래처명을 눌러 원장에서 본다) ──
+function buildSearchDepositHtml(searchQuery) {
+  var deposits = (DATA.deposits || []).filter(function(d) {
+    return (d.company || '').toLowerCase().indexOf(searchQuery) >= 0;
+  }).sort(function(a, b) { return b.date - a.date; });
+  if (deposits.length === 0) return '';
+  var shown = deposits.slice(0, 20);
+  var rows = shown.map(function(d) {
+    return '<tr class="ledger-row deposit">' +
+      '<td>' + formatDate(d.date) + '</td>' +
+      '<td class="ledger-link" style="cursor:pointer" onclick="showLedger(\'' + (d.company || '').replace(/'/g, "\\'") + '\')">' + (d.company || '-') + '</td>' +
+      '<td style="text-align:right;font-weight:600;color:#0F7B52">' + formatAmountFull(d.amount) + '</td>' +
+      '<td>' + depositSourceLabel(d.source) + '</td>' +
+      '</tr>';
+  }).join('');
+  return '<div style="padding:14px 16px 4px;font-size:12px;font-weight:700;color:var(--글자색)">최근 입금내역 <span style="font-weight:400;color:var(--회색글자)">(검색 결과 ' +
+    deposits.length + '건' + (deposits.length > shown.length ? ' 중 최근 ' + shown.length + '건' : '') + ')</span></div>' +
+    '<div class="ledger-table-wrap" style="margin:0 16px 16px"><table class="ledger-table">' +
+    '<thead><tr><th>입금일</th><th>거래처</th><th style="text-align:right">입금액</th><th>출처</th></tr></thead>' +
+    '<tbody>' + rows + '</tbody></table></div>';
 }
 
 // ── 전체 펼치기/접기 ──
@@ -977,7 +1013,7 @@ function openTablePopup() {
   if (!backdrop) return;
   closeTrendDetail();
 
-  var searchQuery = document.getElementById("search-box").value.toLowerCase();
+  var searchQuery = document.getElementById("search-box").value.trim().toLowerCase();
   var list = DATA.records.filter(function(r) {
     if (r.misooamt === 0) return false;
     if (filter.manager !== "전체" && r.manager !== filter.manager) return false;
@@ -1047,8 +1083,28 @@ function renderLedger() {
   // 기간 필터 적용 (매출은 매출일, 입금은 입금일 기준으로 각각 필터링)
   var fromSerial = dateToSerial(ledgerState.dateFrom);
   var toSerial   = dateToSerial(ledgerState.dateTo);
+
+  // 이월 매출: 결제조건이 익월/월말 등이라 매출은 조회 기간 이전(예: 8월)에 났지만 입금은 기간
+  // 안(예: 9월)에 들어오는 건이 많다. 매출을 매출일로만 걸러내면 9월 조회 시 8월 매출이 빠지고
+  // 9월 입금만 남아서 "9월 매출 − 9월 입금"이 실제 미수와 안 맞아 보인다. 그래서 기간 시작일
+  // 이전 매출이라도 (1) 아직 미수가 남아 있거나 (2) 기간 안에 수금(paiddate)된 건은 "이월"로
+  // 같이 보여준다. 이미 기간 전에 완납된 건은 제외.
+  var carriedRecords = [];
+  if (fromSerial > 0) {
+    allRecords.forEach(function(r) {
+      if (r.saledate >= fromSerial) return;
+      var paidInRange = r.paiddate > 0 && r.paiddate >= fromSerial && (toSerial <= 0 || r.paiddate <= toSerial);
+      if (r.misooamt !== 0 || paidInRange) {
+        var copy = {};
+        for (var k in r) copy[k] = r[k];
+        copy.carried = true;
+        carriedRecords.push(copy);
+      }
+    });
+  }
   if (fromSerial > 0) allRecords = allRecords.filter(function(r) { return r.saledate >= fromSerial; });
   if (toSerial > 0)   allRecords = allRecords.filter(function(r) { return r.saledate <= toSerial; });
+  allRecords = carriedRecords.concat(allRecords);
   if (fromSerial > 0) depositRecords = depositRecords.filter(function(d) { return d.date >= fromSerial; });
   if (toSerial > 0)   depositRecords = depositRecords.filter(function(d) { return d.date <= toSerial; });
 
@@ -1106,10 +1162,13 @@ function renderLedger() {
 
   // ── 합계 카드 ──
   html += '<div class="ledger-summary">';
-  html += '<div class="ledger-sum-item"><div class="ledger-sum-label">총 매출액</div><div class="ledger-sum-value">' + formatAmountFull(totalSale) + '</div></div>';
+  html += '<div class="ledger-sum-item"><div class="ledger-sum-label">총 매출액' + (carriedRecords.length ? ' (이월 ' + carriedRecords.length + '건 포함)' : '') + '</div><div class="ledger-sum-value">' + formatAmountFull(totalSale) + '</div></div>';
   html += '<div class="ledger-sum-item"><div class="ledger-sum-label">총 입금액</div><div class="ledger-sum-value" style="color:#0F7B52">' + formatAmountFull(totalPaid) + '</div></div>';
   html += '<div class="ledger-sum-item"><div class="ledger-sum-label">미수 잔액</div><div class="ledger-sum-value" style="color:#C0392B">' + formatAmountFull(totalMisoo) + '</div></div>';
   html += '</div>';
+  if (carriedRecords.length) {
+    html += '<div class="ledger-carry-note">※ 조회 시작일 이전에 매출이 발생했지만 아직 미수이거나 이 기간에 입금된 건은 <span class="ledger-badge carry">이월</span>로 함께 표시됩니다.</div>';
+  }
 
   // ── 뷰 모드별 테이블 ──
   if (ledgerState.viewMode === 'split') {
@@ -1194,7 +1253,7 @@ function renderLedgerSplit(records, deposits) {
       amtHtml = '<span style="color:#0F7B52">완납</span>';
     }
     return '<tr class="' + rowCls + '">' +
-      '<td>' + formatDate(r.saledate) + '</td>' +
+      '<td>' + formatDate(r.saledate) + (r.carried ? ' <span class="ledger-badge carry">이월</span>' : '') + '</td>' +
       '<td>' + (r.origin || '-') + ' / ' + (r.product || '-') + ' ' + badge + '</td>' +
       '<td style="text-align:right">' + formatAmountFull(r.saleamt) + '</td>' +
       '<td style="text-align:right;font-weight:500">' + amtHtml + '</td>' +
@@ -1287,7 +1346,7 @@ function renderLedgerCombined(records, deposits) {
       }
       var rowCls = r.misooamt > 0 ? 'ledger-row unpaid' : '';
       return '<tr class="' + rowCls + '">' +
-        '<td>' + formatDate(r.saledate) + '</td>' +
+        '<td>' + formatDate(r.saledate) + (r.carried ? ' <span class="ledger-badge carry">이월</span>' : '') + '</td>' +
         '<td>' + (r.origin || '-') + '</td>' +
         '<td>' + (r.product || '-') + ' ' + badge + '</td>' +
         '<td style="text-align:center">' + formatAmountFull(r.unitprice) + '</td>' +

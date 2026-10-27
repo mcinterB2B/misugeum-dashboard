@@ -567,6 +567,8 @@ body {
 .ledger-badge.paid    { background: #EAF3DE; color: #3B6D11; }
 .ledger-badge.partial { background: #FFF8E1; color: #854F0B; }
 .ledger-badge.unpaid  { background: #FAECE7; color: #993C1D; }
+.ledger-badge.carry   { background: #E4E8EE; color: #3F4B5B; }
+.ledger-carry-note { font-size: 10px; color: var(--회색글자); padding: 0 4px; }
 
 /* 원장 패널 (오른쪽) */
 #ledger-panel {
