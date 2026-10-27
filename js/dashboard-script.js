@@ -31,8 +31,8 @@
   - formatDate(serial)       : 엑셀 날짜 시리얼 → YYYY-MM-DD
   - calcRisk(serial, paytype): 위험도 계산
   - renderFundIssues()       : 자금 특이사항(과입금/선입금) 렌더 - 필터와 무관하게 항상 표시
-  - injectOutstandingListUI(): "미수 업체 리스트" 검색창+영역을 최근입금내역 아래에 1회 주입
-  - renderOutstandingList()  : 미수 업체 리스트 렌더 (액수 큰 순, 거래처명 검색 반영)
+  - setMainTab(tab)          : 메인 카드의 탭 전환(최근 입금내역/미수 업체 리스트, 검색 시 미수현황/입금내역)
+  - buildOutstandingTabHtml(): "미수 업체 리스트" 탭 내용 (액수 큰 순)
   - setLedgerDateThisMonth() : 원장 기간 필터 빠른 선택 - 당월 1일~말일
   - setLedgerDateLastMonth() : 원장 기간 필터 빠른 선택 - 지난달 1일~말일
   - renderTrendWidget()      : 원장 대기화면에 이번달/지난달 매출·입금 증감 위젯 표시 - 좌측 필터에 반응
@@ -130,13 +130,11 @@ function init() {
   document.getElementById("count-badge").textContent = "총 " + DATA.companies.length + "개 거래처";
   setDefaultDepositDateRange();
   injectTablePopupUI();
-  injectOutstandingListUI();
   renderManagerFilter();
   renderPaytypeFilter();
   renderRiskFilter();
   applyFilters();
   renderFundIssues();
-  renderOutstandingList();
   var btn = document.getElementById("expand-btn");
   if (btn && isAllExpanded) btn.textContent = "▲ 전체 접기";
 }
@@ -157,60 +155,6 @@ function injectTablePopupUI() {
     btn.onclick = openTablePopup;
     controls.insertBefore(btn, controls.firstChild);
   }
-}
-
-// ── "최근 입금내역" 표(.table-container) 바로 아래에 "미수 업체 리스트" + 검색창을
-//    한 번만 주입한다. 위 injectTablePopupUI()와 같은 이유로 정적 레이아웃(매크로)을
-//    건드리지 않고 JS만으로 붙인다. ──
-function injectOutstandingListUI() {
-  if (document.getElementById('outstanding-list-body')) return;
-  var anchor = document.querySelector('.left-panel .table-container');
-  if (!anchor) return;
-  var wrap = document.createElement('div');
-  wrap.className = 'table-container';
-  wrap.innerHTML =
-    '<div class="table-header">' +
-      '<span class="table-title">미수 업체 리스트</span>' +
-      '<div class="table-controls">' +
-        '<input class="search-box" id="outstanding-search-box" placeholder="거래처명 검색..." oninput="renderOutstandingList()">' +
-      '</div>' +
-    '</div>' +
-    '<div id="outstanding-list-body"></div>';
-  anchor.insertAdjacentElement('afterend', wrap);
-}
-
-// ── 미수 업체 리스트 렌더 - DATA.companies(현재 미수금이 남은 거래처 전체)를 액수 큰
-//    순으로 보여주고, 검색창으로 거래처명을 필터링한다. 좌측 담당자/결제조건/위험도
-//    필터와는 무관하게 항상 전체 미수 거래처를 대상으로 한다(거래처를 찾는 용도이므로). ──
-function renderOutstandingList() {
-  var body = document.getElementById('outstanding-list-body');
-  var searchEl = document.getElementById('outstanding-search-box');
-  if (!body || !searchEl) return;
-  var q = searchEl.value.toLowerCase().trim();
-  var companies = (DATA.companies || []).slice()
-    .filter(function(c) { return !q || (c.name || '').toLowerCase().indexOf(q) >= 0; })
-    .sort(function(a, b) { return b.amount - a.amount; });
-
-  if (companies.length === 0) {
-    body.innerHTML = '<div style="padding:20px;text-align:center;color:#6B7A94;font-size:12px">해당하는 거래처가 없습니다</div>';
-    return;
-  }
-  var rows = companies.map(function(c) {
-    return '<tr>' +
-      '<td class="ledger-link" style="cursor:pointer" onclick="showLedger(\'' + (c.name || '').replace(/'/g, "\\'") + '\')">' + c.name + '</td>' +
-      '<td>' + (c.manager || '-') + '</td>' +
-      '<td>' + (c.paytype || '-') + '</td>' +
-      '<td style="text-align:right;font-weight:700;color:var(--빨강)">' + formatAmountFull(c.amount) + '</td>' +
-    '</tr>';
-  }).join('');
-  body.innerHTML =
-    '<div class="ledger-table-wrap" style="max-height:280px">' +
-      '<table class="ledger-table">' +
-        '<thead><tr><th>거래처</th><th>담당자</th><th>결제조건</th><th style="text-align:right">미수금</th></tr></thead>' +
-        '<tbody>' + rows + '</tbody>' +
-      '</table>' +
-    '</div>' +
-    '<div style="padding:6px 4px 0;font-size:10px;color:var(--회색글자)">총 ' + companies.length + '개사</div>';
 }
 
 // ── 담당자 필터 버튼 렌더 ──
@@ -746,48 +690,96 @@ function buildDepositDateFilterHtml() {
     '<button class="ledger-date-reset" onclick="resetDepositDate()">최근 7일</button>';
 }
 
-// ── 최근 입금내역 표 (거래처/결제조건/위험도 전부 "전체"일 때만 노출, 최신순) ──
-function renderDepositTable(searchQuery) {
-  var container = document.getElementById("table-body");
-  var deposits = (DATA.deposits || []).slice();
+// ── 메인 카드 탭 상태: 평소(검색 없음)에는 입금내역/미수 업체 리스트, 검색 중에는
+//    미수현황/입금내역을 오간다. 검색어를 지우면 평소 탭으로 돌아온다. ──
+var mainTabs = { normal: 'deposit', search: 'outstanding' };
 
-  var fromSerial = dateToSerial(depositView.dateFrom);
-  var toSerial   = dateToSerial(depositView.dateTo);
-  if (fromSerial > 0) deposits = deposits.filter(function(d) { return d.date >= fromSerial; });
-  if (toSerial > 0)   deposits = deposits.filter(function(d) { return d.date <= toSerial; });
-  if (searchQuery) deposits = deposits.filter(function(d) { return (d.company || '').toLowerCase().indexOf(searchQuery) >= 0; });
+function setMainTab(tab) {
+  var searching = document.getElementById("search-box").value.trim() !== '';
+  if (searching) mainTabs.search = tab; else mainTabs.normal = tab;
+  renderTable();
+}
 
-  deposits.sort(function(a, b) { return b.date - a.date; }); // 최신일이 맨 위
+function buildMainTabsHtml(tabs, active) {
+  return '<div class="main-tabs">' + tabs.map(function(t) {
+    return '<button class="main-tab' + (t.key === active ? ' active' : '') + '" onclick="setMainTab(\'' + t.key + '\')">' +
+      t.label + '<span class="tab-count">' + t.count + '</span></button>';
+  }).join('') + '</div>';
+}
 
+// 입금 목록을 "날짜 머리글 + 거래처/입금액/출처" 형태로 그린다. 같은 날짜 입금이 줄마다 날짜를
+// 반복해서 지저분해 보이던 것을, 날짜별 머리글(건수·일 합계) 아래에 묶어서 정리한다.
+// 표는 max-height 안에서 스크롤되어 페이지가 끝없이 길어지지 않는다.
+function buildDepositListHtml(deposits, maxRows) {
   if (deposits.length === 0) {
-    container.innerHTML = '<div style="padding:40px;text-align:center;color:#6B7A94">해당 기간에 입금 내역이 없습니다</div>';
-    return;
+    return '<div style="padding:40px;text-align:center;color:#6B7A94">해당하는 입금 내역이 없습니다</div>';
   }
+  var sorted = deposits.slice().sort(function(a, b) { return b.date - a.date; });
+  var total = sorted.reduce(function(s, d) { return s + d.amount; }, 0);
+  var shown = maxRows ? sorted.slice(0, maxRows) : sorted;
 
   var rows = '';
-  deposits.forEach(function(d) {
-    rows += '<tr class="ledger-row deposit">';
-    rows += '<td>' + formatDate(d.date) + '</td>';
-    rows += '<td class="ledger-link" style="cursor:pointer" onclick="showLedger(\'' + (d.company || '').replace(/'/g, "\\'") + '\')">' + (d.company || '-') + '</td>';
-    rows += '<td style="text-align:right;font-weight:600;color:#0F7B52">' + formatAmountFull(d.amount) + '</td>';
-    rows += '<td>' + depositSourceLabel(d.source) + '</td>';
-    rows += '</tr>';
+  var i = 0;
+  while (i < shown.length) {
+    var day = shown[i].date, group = [];
+    while (i < shown.length && shown[i].date === day) { group.push(shown[i]); i++; }
+    var daySum = group.reduce(function(s, d) { return s + d.amount; }, 0);
+    rows += '<tr class="dep-day"><td>' + formatDate(day) + '<span class="dep-day-count">' + group.length + '건</span></td>' +
+      '<td class="dep-day-sum">' + formatAmountFull(daySum) + '</td><td></td></tr>';
+    group.forEach(function(d) {
+      var co = (d.company || '-');
+      rows += '<tr class="dep-row">' +
+        '<td class="cell-co ledger-link" style="cursor:pointer" onclick="showLedger(\'' + co.replace(/'/g, "\\'") + '\')">' + co + '</td>' +
+        '<td class="dep-amt">' + formatAmountFull(d.amount) + '</td>' +
+        '<td>' + depositSourceLabel(d.source) + '</td></tr>';
+    });
+  }
+  return '<div class="list-summary">총 <b>' + sorted.length + '건</b> · 합계 <b style="color:#0F7B52">' + formatAmountFull(total) + '</b>' +
+      (shown.length < sorted.length ? ' <span class="list-summary-note">(최근 ' + shown.length + '건만 표시)</span>' : '') + '</div>' +
+    '<div class="ledger-table-wrap scroll-box"><table class="ledger-table">' +
+    '<thead><tr><th>거래처</th><th style="text-align:right">입금액</th><th>출처</th></tr></thead>' +
+    '<tbody>' + rows + '</tbody></table></div>';
+}
+
+// 기간(depositView) 안의 입금 - 탭 건수 표시와 입금 탭 내용에 같이 쓴다
+function getDepositsInRange() {
+  var from = dateToSerial(depositView.dateFrom), to = dateToSerial(depositView.dateTo);
+  return (DATA.deposits || []).filter(function(d) {
+    return (from <= 0 || d.date >= from) && (to <= 0 || d.date <= to);
   });
+}
 
-  var total = deposits.reduce(function(s, d) { return s + d.amount; }, 0);
+// 미수가 남은 거래처 목록(액수 큰 순). 거래처명 아래에 담당자·결제조건을 작게 붙여서 열 수를
+// 줄이고(폰에서도 한 화면), 최장 경과일과 위험도를 같이 보여준다. query가 있으면 거래처명 필터.
+function getOutstandingCompanies(query) {
+  var by = {};
+  DATA.records.forEach(function(r) {
+    if (r.misooamt === 0) return;
+    if (query && r.company.toLowerCase().indexOf(query) < 0) return;
+    var c = by[r.company] || (by[r.company] = { name: r.company, manager: r.manager, paytype: r.paytype, amount: 0, oldest: r.saledate, oldestPay: r.paytype });
+    c.amount += r.misooamt;
+    if (r.saledate < c.oldest) { c.oldest = r.saledate; c.oldestPay = r.paytype; }
+  });
+  return Object.keys(by).map(function(k) { return by[k]; }).sort(function(a, b) { return b.amount - a.amount; });
+}
 
-  // 거래처명 바로 옆에서 금액을 확인할 수 있도록 [입금일→거래처→입금액→출처] 순으로 재배치하고,
-  // 표 폭을 줄여서 생기는 우측 여백에는 '집중 관리 대상(Top 10 최장 미회수 거래처)'를 나란히 배치한다.
-  var html = '<div class="deposit-split-row">';
-  html += '<div class="deposit-table-col"><div class="ledger-table-wrap">';
-  html += '<table class="ledger-table">';
-  html += '<thead><tr><th>입금일</th><th>거래처</th><th style="text-align:right">입금액</th><th>출처</th></tr></thead>';
-  html += '<tbody>' + rows + '</tbody>';
-  html += '<tfoot><tr class="ledger-foot"><td colspan="2">합계 (' + deposits.length + '건)</td><td style="text-align:right;color:#0F7B52">' + formatAmountFull(total) + '</td><td></td></tr></tfoot>';
-  html += '</table></div></div>';
-  html += '<div class="top-baddebt-col">' + buildTopBadDebtHtml() + '</div>';
-  html += '</div>';
-  container.innerHTML = html;
+function buildOutstandingTabHtml() {
+  var list = getOutstandingCompanies('');
+  if (list.length === 0) return '<div style="padding:40px;text-align:center;color:#6B7A94">미수 거래처가 없습니다</div>';
+  var total = list.reduce(function(s, c) { return s + c.amount; }, 0);
+  var rows = list.map(function(c) {
+    var risk = calcRisk(c.oldest, c.oldestPay);
+    return '<tr class="dep-row">' +
+      '<td class="cell-co ledger-link" style="cursor:pointer" onclick="showLedger(\'' + c.name.replace(/'/g, "\\'") + '\')">' + c.name +
+        '<div class="co-sub">' + (c.manager || '-') + ' · ' + (c.paytype || '-') + '</div></td>' +
+      '<td class="dep-amt" style="color:var(--빨강)">' + formatAmountFull(c.amount) + '</td>' +
+      '<td style="white-space:nowrap"><span class="risk-dot ' + risk.level + '"></span>D+' + risk.days + '일</td></tr>';
+  }).join('');
+  return '<div class="list-summary">미수 거래처 <b>' + list.length + '개사</b> · 합계 <b style="color:var(--빨강)">' + formatAmountFull(total) + '</b>' +
+      '<span class="list-summary-note"> (거래처명을 누르면 원장, 위 검색창에 입력하면 상세 미수현황)</span></div>' +
+    '<div class="ledger-table-wrap scroll-box"><table class="ledger-table">' +
+    '<thead><tr><th>거래처</th><th style="text-align:right">미수금</th><th>최장 경과</th></tr></thead>' +
+    '<tbody>' + rows + '</tbody></table></div>';
 }
 
 // ── 집중 관리 대상: 위험/심각 등급 미수금을 거래처 단위로 합산해, 미회수 기간(경과일)이
@@ -813,13 +805,14 @@ function buildTopBadDebtHtml() {
   if (top10.length === 0) {
     html += '<div class="baddebt-empty">위험/심각 등급 미수금이 없습니다</div>';
   } else {
-    html += '<table class="baddebt-table"><thead><tr><th>거래처</th><th style="text-align:right">경과일</th><th style="text-align:right">미수금</th><th style="text-align:right">담당자</th></tr></thead><tbody>';
+    // 담당자는 별도 열 대신 거래처명 아래 작은 글씨로 붙여서 좁은 칸에서도 한 줄 덜 꺾이게 한다
+    html += '<table class="baddebt-table"><thead><tr><th>거래처</th><th style="text-align:right">경과</th><th style="text-align:right">미수금</th></tr></thead><tbody>';
     top10.forEach(function(c) {
       html += '<tr>';
-      html += '<td class="ledger-link" style="cursor:pointer" onclick="showLedger(\'' + c.name.replace(/'/g, "\\'") + '\')">' + c.name + '</td>';
-      html += '<td style="text-align:right;color:var(--회색글자)">D+' + c.maxDays + '일</td>';
+      html += '<td class="ledger-link" style="cursor:pointer" onclick="showLedger(\'' + c.name.replace(/'/g, "\\'") + '\')">' + c.name +
+        '<div class="co-sub">' + (c.manager || '-') + '</div></td>';
+      html += '<td style="text-align:right;color:var(--회색글자)">D+' + c.maxDays + '</td>';
       html += '<td style="text-align:right;font-weight:700;color:var(--빨강)">' + formatAmountFull(c.amount) + '</td>';
-      html += '<td style="text-align:right;color:var(--회색글자)">' + (c.manager || '-') + '</td>';
       html += '</tr>';
     });
     html += '</tbody></table>';
@@ -840,26 +833,58 @@ function renderTable() {
   // 메인 화면(필터 전부 "전체")에서 거래처명을 검색하면, 담당자 이름을 먼저 눌러 들어가지 않아도
   // 바로 그 거래처의 미수현황이 나오도록 최근 입금내역 대신 미수 상세내역으로 전환한다.
   var isMainSearch = isAllFilter && searchQuery !== '';
+  var tableContainer = document.getElementById("table-body");
 
   if (isAllFilter && !isMainSearch) {
-    // 필터가 전부 "전체"일 때는 미수내역 대신 최근 입금내역을 보여줌
-    setKpiText("table-title", "최근 입금내역");
+    // 필터가 전부 "전체"이고 검색어도 없는 첫 화면: [최근 입금내역 | 미수 업체 리스트] 탭.
+    // 예전엔 입금 표가 끝없이 길어서 아래 미수 업체 리스트가 보이지도 않았는데, 한 카드 안에서
+    // 탭으로 오가고 표는 스크롤 박스에 가둬서 둘 다 바로 보이게 했다.
+    var depositsInRange = getDepositsInRange();
+    var tab = mainTabs.normal;
+    setKpiText("table-title", "미수 · 입금 현황");
     if (expandBtn) expandBtn.style.display = "none";
     if (popupBtn) popupBtn.style.display = "none";
     if (colHeader) colHeader.style.display = "none";
     if (dateFilterEl) {
-      dateFilterEl.style.display = "flex";
+      dateFilterEl.style.display = tab === 'deposit' ? "flex" : "none";
       dateFilterEl.innerHTML = buildDepositDateFilterHtml();
     }
-    renderDepositTable(searchQuery);
+    var tabsHtml = buildMainTabsHtml([
+      { key: 'deposit', label: '최근 입금내역', count: depositsInRange.length },
+      { key: 'outstanding', label: '미수 업체 리스트', count: getOutstandingCompanies('').length }
+    ], tab);
+    var bodyHtml;
+    if (tab === 'deposit') {
+      bodyHtml = '<div class="deposit-split-row"><div class="deposit-table-col">' + buildDepositListHtml(depositsInRange) +
+        '</div><div class="top-baddebt-col">' + buildTopBadDebtHtml() + '</div></div>';
+    } else {
+      bodyHtml = '<div class="outstanding-wrap">' + buildOutstandingTabHtml() + '</div>';
+    }
+    tableContainer.innerHTML = tabsHtml + bodyHtml;
     return;
   }
 
-  if (expandBtn) expandBtn.style.display = "";
-  if (popupBtn) popupBtn.style.display = "";
-  if (colHeader) colHeader.style.display = "";
+  if (expandBtn) expandBtn.style.display = isMainSearch ? "none" : "";
+  if (popupBtn) popupBtn.style.display = (isMainSearch && mainTabs.search !== 'outstanding') ? "none" : "";
+  if (colHeader) colHeader.style.display = (isMainSearch && mainTabs.search !== 'outstanding') ? "none" : "";
   if (dateFilterEl) dateFilterEl.style.display = "none";
-  setKpiText("table-title", isMainSearch ? "'" + rawQuery + "' 미수현황"
+
+  // 검색 결과 모드의 탭: [미수현황 | 입금내역] (각 탭에 검색에 걸린 건수 표시)
+  var searchTabsHtml = '';
+  if (isMainSearch) {
+    var matchedDeposits = (DATA.deposits || []).filter(function(d) { return (d.company || '').toLowerCase().indexOf(searchQuery) >= 0; });
+    searchTabsHtml = buildMainTabsHtml([
+      { key: 'outstanding', label: '미수현황', count: getOutstandingCompanies(searchQuery).length + '개사' },
+      { key: 'deposit', label: '입금내역', count: matchedDeposits.length + '건' }
+    ], mainTabs.search);
+    if (mainTabs.search === 'deposit') {
+      // 입금 탭: 검색어에 해당하는 거래처의 입금(최신순, 최대 200건)을 날짜별로 묶어서 보여준다
+      setKpiText("table-title", "'" + rawQuery + "' 검색 결과");
+      tableContainer.innerHTML = searchTabsHtml + buildDepositListHtml(matchedDeposits, 200);
+      return;
+    }
+  }
+  setKpiText("table-title", isMainSearch ? "'" + rawQuery + "' 검색 결과"
     : filter.manager === "전체" ? "전체 미수내역" : filter.manager + " 담당 미수내역");
 
   var records = DATA.records.filter(function(r) {
@@ -873,12 +898,10 @@ function renderTable() {
     return true;
   });
   var container = document.getElementById("table-body");
-  // 검색 결과일 때는 미수 표 아래에 그 거래처의 최근 입금도 같이 보여준다(완납 거래처는 미수가 없어서 입금만 보임)
-  var searchDepositHtml = isMainSearch ? buildSearchDepositHtml(searchQuery) : '';
   if (records.length === 0) {
-    container.innerHTML = '<div style="padding:40px;text-align:center;color:#6B7A94">' +
-      (isMainSearch ? "'" + rawQuery.replace(/</g, '&lt;') + "' 거래처의 미수 내역이 없습니다 (완납이거나 없는 거래처)" : '데이터 없음') +
-      '</div>' + searchDepositHtml;
+    container.innerHTML = searchTabsHtml + '<div style="padding:40px;text-align:center;color:#6B7A94">' +
+      (isMainSearch ? "'" + rawQuery.replace(/</g, '&lt;') + "' 거래처의 미수 내역이 없습니다 (완납이거나 없는 거래처 — 입금내역 탭에서 확인)" : '데이터 없음') +
+      '</div>';
     return;
   }
   var byPaytype = {};
@@ -965,30 +988,8 @@ function renderTable() {
     html += '</div>'; // paytype-row 끝
     html += '</div>'; // paytype-group 끝
   });
-  container.innerHTML = html + searchDepositHtml;
-}
-
-// ── 메인 화면 거래처 검색 결과 아래에 붙는 "최근 입금내역" - 검색어에 해당하는 거래처의 입금만,
-//    최신순 20건까지. (전체 기간 내역은 거래처명을 눌러 원장에서 본다) ──
-function buildSearchDepositHtml(searchQuery) {
-  var deposits = (DATA.deposits || []).filter(function(d) {
-    return (d.company || '').toLowerCase().indexOf(searchQuery) >= 0;
-  }).sort(function(a, b) { return b.date - a.date; });
-  if (deposits.length === 0) return '';
-  var shown = deposits.slice(0, 20);
-  var rows = shown.map(function(d) {
-    return '<tr class="ledger-row deposit">' +
-      '<td>' + formatDate(d.date) + '</td>' +
-      '<td class="ledger-link" style="cursor:pointer" onclick="showLedger(\'' + (d.company || '').replace(/'/g, "\\'") + '\')">' + (d.company || '-') + '</td>' +
-      '<td style="text-align:right;font-weight:600;color:#0F7B52">' + formatAmountFull(d.amount) + '</td>' +
-      '<td>' + depositSourceLabel(d.source) + '</td>' +
-      '</tr>';
-  }).join('');
-  return '<div style="padding:14px 16px 4px;font-size:12px;font-weight:700;color:var(--글자색)">최근 입금내역 <span style="font-weight:400;color:var(--회색글자)">(검색 결과 ' +
-    deposits.length + '건' + (deposits.length > shown.length ? ' 중 최근 ' + shown.length + '건' : '') + ')</span></div>' +
-    '<div class="ledger-table-wrap" style="margin:0 16px 16px"><table class="ledger-table">' +
-    '<thead><tr><th>입금일</th><th>거래처</th><th style="text-align:right">입금액</th><th>출처</th></tr></thead>' +
-    '<tbody>' + rows + '</tbody></table></div>';
+  // 검색 결과 모드는 결과가 많아도 카드가 끝없이 길어지지 않게 스크롤 박스에 담는다
+  container.innerHTML = isMainSearch ? searchTabsHtml + '<div class="search-result-box">' + html + '</div>' : html;
 }
 
 // ── 전체 펼치기/접기 ──
