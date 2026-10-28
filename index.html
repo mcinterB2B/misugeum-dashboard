@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html><html lang=ko><head><meta charset=UTF-8>
+<!DOCTYPE html><html lang=ko><head><meta charset=UTF-8>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>미수금 현황 대시보드 | ConnectBean</title>
 <script>
@@ -480,7 +480,7 @@ body {
   font-weight: 700;
   color: var(--네이비);
 }
-.ledger-sub {
+.ledger-sub, .ledger-asof {
   font-size: 11px;
   color: var(--회색글자);
   margin-top: 3px;
@@ -1448,12 +1448,50 @@ function renderFundIssues() {
   el.innerHTML = html;
 }
 
+// ── 데이터 갱신 시각 표시 ──
+// DATA.updatedAt  : 매크로가 대시보드를 만든 시각 ("YYYY-MM-DD HH:MM:SS")
+// DATA.depositAsOf: 입금내역을 내려받은(마감) 시각 ("YYYY-MM-DD HH:MM", 매크로에서 입력했을 때만)
+// 입금내역을 받은 시각과 대시보드를 만든 시각이 다를 수 있어서 둘을 따로 보여준다.
+// 구버전 매크로로 만든 파일은 두 값이 없으니 예전처럼 기준일만 보여준다.
+function getUpdateInfo() {
+  var updated = DATA.updatedAt || '';
+  var asOf = DATA.depositAsOf || '';
+  var asOfShort = asOf;
+  // 입금 마감이 갱신일과 같은 날이면 날짜는 생략하고 시각만 보여준다
+  if (asOf && updated && asOf.slice(0, 10) === updated.slice(0, 10)) asOfShort = asOf.slice(11);
+  return { updated: updated, asOf: asOf, asOfShort: asOfShort };
+}
+function renderUpdateBadges() {
+  var info = getUpdateInfo();
+  var dateBadge = document.getElementById("date-badge");
+  if (!info.updated) { dateBadge.textContent = "기준일: " + DATA.today; return; }
+  dateBadge.textContent = "갱신: " + info.updated;
+  dateBadge.title = "대시보드가 만들어진 시각";
+  if (info.asOf) {
+    var dep = document.getElementById("deposit-badge");
+    if (!dep) {
+      dep = document.createElement("span");
+      dep.className = "header-badge";
+      dep.id = "deposit-badge";
+      dateBadge.parentNode.insertBefore(dep, dateBadge.nextSibling);
+    }
+    dep.textContent = "입금 반영: " + info.asOfShort + "까지";
+    dep.title = "이 시각까지의 입금내역이 반영되어 있습니다";
+  }
+}
+// 원장 화면/출력물에 넣는 한 줄 (출력해서 전달해도 어느 시점 자료인지 남도록)
+function buildAsOfLine() {
+  var info = getUpdateInfo();
+  if (!info.updated) return '기준일 ' + DATA.today;
+  return '갱신 ' + info.updated + (info.asOf ? ' · 입금 반영 ' + info.asOfShort + '까지' : '');
+}
+
 // ── 초기화 ──
 function init() {
   // 메인 화면 검색창이 "입금내역 필터"로만 보이던 것을, 미수현황 조회용임이 드러나게 안내
   var mainSearch = document.getElementById("search-box");
   if (mainSearch) mainSearch.placeholder = "거래처명 검색 → 미수현황";
-  document.getElementById("date-badge").textContent = "기준일: " + DATA.today;
+  renderUpdateBadges();
   document.getElementById("count-badge").textContent = "총 " + DATA.companies.length + "개 거래처";
   setDefaultDepositDateRange();
   injectTablePopupUI();
@@ -2677,6 +2715,7 @@ function renderLedger() {
   html += '<div>';
   html += '<div class="ledger-company-name">' + companyName + '</div>';
   html += '<div class="ledger-sub">' + paytype + ' · 담당: ' + manager + '</div>';
+  html += '<div class="ledger-asof">' + buildAsOfLine() + '</div>';
   html += '</div>';
   html += '<div class="print-hide" style="display:flex;gap:6px">';
   html += '<button class="ledger-pdf-btn" onclick="printLedger()">🖨 PDF 다운로드</button>';

@@ -452,7 +452,7 @@ body {
   font-weight: 700;
   color: var(--네이비);
 }
-.ledger-sub {
+.ledger-sub, .ledger-asof {
   font-size: 11px;
   color: var(--회색글자);
   margin-top: 3px;
