@@ -124,7 +124,7 @@ function renderFundIssues() {
 
 // ── 데이터 갱신 시각 표시 ──
 // DATA.updatedAt  : 매크로가 대시보드를 만든 시각 ("YYYY-MM-DD HH:MM:SS")
-// DATA.depositAsOf: 입금내역을 내려받은(마감) 시각 ("YYYY-MM-DD HH:MM", 매크로에서 입력했을 때만)
+// DATA.depositAsOf: 입금 시트 거래일시 중 가장 늦은 시각 ("YYYY-MM-DD HH:MM:SS", 매크로가 시트에서 자동으로 읽음)
 // 입금내역을 받은 시각과 대시보드를 만든 시각이 다를 수 있어서 둘을 따로 보여준다.
 // 구버전 매크로로 만든 파일은 두 값이 없으니 예전처럼 기준일만 보여준다.
 function getUpdateInfo() {
@@ -149,15 +149,15 @@ function renderUpdateBadges() {
       dep.id = "deposit-badge";
       dateBadge.parentNode.insertBefore(dep, dateBadge.nextSibling);
     }
-    dep.textContent = "입금 반영: " + info.asOfShort + "까지";
-    dep.title = "이 시각까지의 입금내역이 반영되어 있습니다";
+    dep.textContent = "최종 입금: " + info.asOfShort;
+    dep.title = "입금내역 시트에 기록된 마지막 거래일시 (이 시각 이후의 입금은 아직 반영되지 않았을 수 있습니다)";
   }
 }
 // 원장 화면/출력물에 넣는 한 줄 (출력해서 전달해도 어느 시점 자료인지 남도록)
 function buildAsOfLine() {
   var info = getUpdateInfo();
   if (!info.updated) return '기준일 ' + DATA.today;
-  return '갱신 ' + info.updated + (info.asOf ? ' · 입금 반영 ' + info.asOfShort + '까지' : '');
+  return '갱신 ' + info.updated + (info.asOf ? ' · 최종 입금 ' + info.asOfShort : '');
 }
 
 // ── 초기화 ──
