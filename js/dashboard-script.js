@@ -902,6 +902,7 @@ function setupChartAllLayout() {
 
 // ── 미수 테이블 렌더링 ──
 function renderTable() {
+  clearAmtSelection();
   var rawQuery = document.getElementById("search-box").value.trim();
   var searchQuery = rawQuery.toLowerCase();
   var expandBtn = document.getElementById("expand-btn");
@@ -1284,6 +1285,7 @@ function depositSettleNote(d) {
 function renderLedger() {
   var companyName = ledgerState.company;
   if (!companyName) return;
+  clearAmtSelection();
 
   // 해당 거래처 전체 내역 (매출/미수금 - 인보이스 단위, 왼쪽 패널과 동일 기준)
   var allRecords = DATA.records.filter(function(r) {
@@ -1387,6 +1389,7 @@ function renderLedger() {
   html += '<div class="ledger-sum-item"><div class="ledger-sum-label">총 입금액</div><div class="ledger-sum-value" style="color:#0F7B52">' + formatAmountFull(totalPaid) + '</div></div>';
   html += '<div class="ledger-sum-item"><div class="ledger-sum-label">미수 잔액</div><div class="ledger-sum-value" style="color:#C0392B">' + formatAmountFull(totalMisoo) + '</div></div>';
   html += '</div>';
+  html += '<div class="ledger-carry-note print-hide">💡 금액 칸을 클릭하면 선택되고, <b>Ctrl+클릭</b>으로 여러 칸을, <b>Shift+클릭/드래그</b>로 범위를 고르면 엑셀처럼 합계가 아래에 표시됩니다.</div>';
   if (carriedRecords.length) {
     html += '<div class="ledger-carry-note">※ 조회 시작일 이전에 매출이 났지만 아직 미수이거나 이 기간에 입금된 건은 이월로 함께 표시됩니다. ' +
       '<span class="lg-chip carry-unpaid">이월 미수</span> 기초 미수가 아직 남은 건 · ' +
@@ -1466,8 +1469,8 @@ function renderLedgerSplit(records, deposits) {
     return '<tr id="' + sid + '" class="ledger-row ' + st.rowCls + '">' +
       '<td>' + formatDate(r.saledate) + '</td>' +
       '<td>' + (r.origin || '-') + ' / ' + (r.product || '-') + ' ' + st.chip + '</td>' +
-      '<td style="text-align:right">' + formatAmountFull(r.saleamt) + '</td>' +
-      '<td style="text-align:right">' + st.misoo + '</td>' +
+      '<td class="amt amt-sale" style="text-align:right">' + formatAmountFull(r.saleamt) + '</td>' +
+      '<td class="amt amt-misoo" style="text-align:right">' + st.misoo + '</td>' +
       '</tr>';
   }
   function saleSubtotalHtml(label, group, kind) {
@@ -1489,7 +1492,7 @@ function renderLedgerSplit(records, deposits) {
     return '<tr id="' + ledgerView.depIds.get(d) + '" class="ledger-row deposit">' +
       '<td>' + formatDate(d.date) + '</td>' +
       '<td><span class="lg-chip deposit">입금</span> ' + depositSourceLabel(d.source) + (note ? '<div class="settle-line">' + note + '</div>' : '') + '</td>' +
-      '<td style="text-align:right;color:#0F7B52;font-weight:600">' + formatAmountFull(d.amount) + '</td>' +
+      '<td class="amt amt-paid" style="text-align:right;color:#0F7B52;font-weight:600">' + formatAmountFull(d.amount) + '</td>' +
       '</tr>';
   }
   function depositSubtotalHtml(label, group, kind) {
@@ -1555,9 +1558,9 @@ function renderLedgerCombined(records, deposits) {
         '<td>' + (r.product || '-') + '</td>' +
         '<td style="text-align:center">' + formatAmountFull(r.unitprice) + '</td>' +
         '<td style="text-align:center">' + (r.qty || 0).toLocaleString('ko-KR') + '</td>' +
-        '<td style="text-align:right">' + formatAmountFull(r.saleamt) + '</td>' +
+        '<td class="amt amt-sale" style="text-align:right">' + formatAmountFull(r.saleamt) + '</td>' +
         '<td style="text-align:right">-</td>' +
-        '<td style="text-align:right">' + st.misoo + '</td>' +
+        '<td class="amt amt-misoo" style="text-align:right">' + st.misoo + '</td>' +
         '</tr>';
     }
     var d = item.d;
@@ -1570,7 +1573,7 @@ function renderLedgerCombined(records, deposits) {
       '<td style="text-align:center">-</td>' +
       '<td style="text-align:center">-</td>' +
       '<td style="text-align:right">-</td>' +
-      '<td style="text-align:right;color:#0F7B52;font-weight:600">' + formatAmountFull(d.amount) + '</td>' +
+      '<td class="amt amt-paid" style="text-align:right;color:#0F7B52;font-weight:600">' + formatAmountFull(d.amount) + '</td>' +
       '<td style="text-align:right">-</td>' +
       '</tr>';
   }
@@ -1682,6 +1685,7 @@ function setLedgerDateLastMonth() {
 
 // ── 원장 닫기 → 차트 다시 표시 ──
 function closeLedger() {
+  clearAmtSelection();
   var rightPanel = document.getElementById("ledger-panel");
   if (rightPanel) {
     rightPanel.style.display = "none";
@@ -1813,5 +1817,125 @@ function renderCharts(managers, selectedManager) {
     });
   }
 }
+
+// ══════════════════════════════════════════
+// 금액 칸 선택 → 합계 (엑셀 상태 표시줄처럼)
+// ══════════════════════════════════════════
+// 원장(#ledger-panel)과 왼쪽 표(#table-body)의 금액 칸을 클릭해서 고르면 화면 아래 막대에
+// 선택한 칸의 개수·합계·평균을 보여준다.
+//   · 클릭: 그 칸만 선택            · Ctrl(Cmd)+클릭: 칸을 하나씩 추가/해제
+//   · Shift+클릭 또는 드래그: 범위 선택   · Esc 또는 ✕: 선택 해제
+//   · 터치 화면은 Ctrl이 없으므로 탭할 때마다 추가/해제로 동작
+// 소계/합계 행은 이중 계산을 막기 위해 선택 대상에서 뺀다.
+var AMT_CELL_SEL = 'td.amt, td.cell-sale, td.cell-paid, td.cell-misoo, td.dep-amt';
+var amtSel = [];          // 선택된 td 목록
+var amtAnchor = null;     // Shift/드래그 범위의 시작 칸
+var amtDragging = false;
+
+// 칸의 금액(원). 선택 대상이 아니거나 금액이 없는 칸("완납", "-")은 null
+function amtValue(td) {
+  if (!td || !td.matches || !td.matches(AMT_CELL_SEL)) return null;
+  var tr = td.parentNode;
+  if (tr.classList.contains('subtotal') || tr.classList.contains('dep-day') || tr.classList.contains('ledger-foot')) return null;
+  // 완납 칸 아래 "10/16 입금 2,750,000원" 같은 보조 줄(settle-line)의 금액은 그 칸의 금액이 아니므로 뺀다
+  var src = td;
+  var sub = td.querySelector('.settle-line');
+  if (sub) { src = td.cloneNode(true); var s2 = src.querySelector('.settle-line'); s2.parentNode.removeChild(s2); }
+  var m = src.textContent.match(/(-?[\d,]+)원/);
+  return m ? parseInt(m[1].replace(/,/g, ''), 10) : null;
+}
+
+function amtColKey(td) {
+  var keys = ['amt-sale', 'amt-paid', 'amt-misoo', 'cell-sale', 'cell-paid', 'cell-misoo', 'dep-amt'];
+  for (var i = 0; i < keys.length; i++) if (td.classList.contains(keys[i])) return keys[i];
+  return 'amt';
+}
+
+function amtBar() {
+  var bar = document.getElementById('amt-sum-bar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'amt-sum-bar';
+    bar.className = 'amt-sum-bar print-hide';
+    bar.style.display = 'none';
+    document.body.appendChild(bar);
+  }
+  return bar;
+}
+
+function renderAmtBar() {
+  var bar = amtBar();
+  if (!amtSel.length) { bar.style.display = 'none'; return; }
+  var sum = amtSel.reduce(function(s, td) { return s + amtValue(td); }, 0);
+  bar.innerHTML = '<span class="asb-item"><span class="asb-label">선택</span><b>' + amtSel.length + '개</b></span>' +
+    '<span class="asb-item asb-sum"><span class="asb-label">합계</span><b>' + formatAmountFull(sum) + '</b></span>' +
+    '<span class="asb-item"><span class="asb-label">평균</span><b>' + formatAmountFull(Math.round(sum / amtSel.length)) + '</b></span>' +
+    '<button class="asb-clear" onclick="clearAmtSelection()" title="선택 해제 (Esc)">✕</button>';
+  bar.style.display = 'flex';
+}
+
+function setAmtSelection(cells) {
+  amtSel.forEach(function(td) { td.classList.remove('amt-selected'); });
+  amtSel = cells.filter(function(td, i) { return cells.indexOf(td) === i; });
+  amtSel.forEach(function(td) { td.classList.add('amt-selected'); });
+  renderAmtBar();
+}
+
+function clearAmtSelection() {
+  amtAnchor = null; amtDragging = false;
+  if (amtSel.length) setAmtSelection([]);
+}
+
+// 같은 표 안에서 anchor~target 사이(문서 순서)에 있는, 두 칸의 열에 해당하는 금액 칸들
+function amtRange(a, b) {
+  var table = a.closest('table');
+  if (!table || table !== b.closest('table')) return [b];
+  var keys = [amtColKey(a), amtColKey(b)];
+  var all = Array.prototype.slice.call(table.querySelectorAll(AMT_CELL_SEL));
+  var i = all.indexOf(a), j = all.indexOf(b);
+  if (i < 0 || j < 0) return [b];
+  var lo = Math.min(i, j), hi = Math.max(i, j);
+  return all.slice(lo, hi + 1).filter(function(td) { return amtValue(td) !== null && keys.indexOf(amtColKey(td)) >= 0; });
+}
+
+function amtCellFromEvent(e) {
+  var td = e.target.closest ? e.target.closest(AMT_CELL_SEL) : null;
+  if (!td || amtValue(td) === null) return null;
+  return (td.closest('#ledger-panel') || td.closest('#table-body')) ? td : null;
+}
+
+document.addEventListener('mousedown', function(e) {
+  if (e.button !== 0) return;
+  var td = amtCellFromEvent(e);
+  if (!td) {
+    // 금액 칸 밖을 누르면: 막대/원장 안의 다른 조작이 아닌 빈 곳일 때만 선택 해제
+    if (amtSel.length && !e.target.closest('#amt-sum-bar') && !e.target.closest('#ledger-panel') && !e.target.closest('#table-body')) clearAmtSelection();
+    return;
+  }
+  e.preventDefault();   // 드래그/Shift 클릭 때 글자가 파랗게 선택되는 것 방지
+  var coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  var toggle = e.ctrlKey || e.metaKey || coarse;
+  if (e.shiftKey && amtAnchor) {
+    setAmtSelection(amtRange(amtAnchor, td));
+  } else if (toggle) {
+    var idx = amtSel.indexOf(td);
+    var next = amtSel.slice();
+    if (idx >= 0) next.splice(idx, 1); else next.push(td);
+    amtAnchor = td;
+    setAmtSelection(next);
+  } else {
+    amtAnchor = td; amtDragging = true;
+    setAmtSelection([td]);
+  }
+});
+
+document.addEventListener('mouseover', function(e) {
+  if (!amtDragging || !amtAnchor) return;
+  var td = amtCellFromEvent(e);
+  if (td && td !== amtAnchor) setAmtSelection(amtRange(amtAnchor, td));
+});
+
+document.addEventListener('mouseup', function() { amtDragging = false; });
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') clearAmtSelection(); });
 
 window.addEventListener('DOMContentLoaded', init);
