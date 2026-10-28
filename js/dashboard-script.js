@@ -126,10 +126,8 @@ function renderFundIssues() {
 // DATA.depositAsOf: 입금 시트 거래일시 중 가장 늦은 시각 ("YYYY-MM-DD HH:MM:SS", 매크로가 시트에서 자동으로 읽음)
 // 이 시각까지의 입금이 대시보드에 반영돼 있다는 뜻. 값이 없는 파일(구버전 매크로 등)은 예전처럼 기준일만 보여준다.
 function getDepositAsOfText() {
-  var asOf = DATA.depositAsOf || '';
-  if (!asOf) return '';
-  // 오늘 입금이면 시각만, 이전 날짜면 날짜까지 보여준다
-  return asOf.slice(0, 10) === DATA.today ? asOf.slice(11) : asOf;
+  // 날짜는 항상 같이 보여준다 (시각만 있으면 어느 날 기준인지 헷갈림)
+  return DATA.depositAsOf || '';
 }
 function renderUpdateBadges() {
   var dateBadge = document.getElementById("date-badge");
